@@ -113,7 +113,8 @@ def bandwidth_to_max_bin(rate, n_fft, bandwidth):
         0, float(rate) / 2, n_fft // 2 + 1,
         endpoint=True
     )
-
+    #print(freqs[1480:1490])
+    #print(np.where(freqs <= bandwidth)[0])
     return np.max(np.where(freqs <= bandwidth)[0]) + 1
 
 

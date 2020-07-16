@@ -14,13 +14,13 @@ import tqdm
 from contextlib import redirect_stderr
 import io
 
-
 def load_model(target, model_name='umxhq', device='cpu'):
     """
     target model path can be either <target>.pth, or <target>-sha256.pth
     (as used on torchub)
     """
     model_path = Path(model_name).expanduser()
+
     if not model_path.exists():
         # model path does not exist, use hubconf model
         try:
@@ -33,7 +33,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
                     target=target,
                     device=device,
                     pretrained=True
-                )
+                ) # load pre-trained model from torch.hub
             print(err.getvalue())
         except AttributeError:
             raise NameError('Model does not exist on torchhub')
@@ -48,12 +48,14 @@ def load_model(target, model_name='umxhq', device='cpu'):
             target_model_path,
             map_location=device
         )
-
+        #print(state)
+        
         max_bin = utils.bandwidth_to_max_bin(
             state['sample_rate'],
             results['args']['nfft'],
             results['args']['bandwidth']
-        )
+        ) # returns the number of frequency bins so that their frequency is lower
+        # than the bandwidth indicated in the .json files
 
         unmix = model.OpenUnmix(
             n_fft=results['args']['nfft'],
@@ -62,8 +64,10 @@ def load_model(target, model_name='umxhq', device='cpu'):
             hidden_size=results['args']['hidden_size'],
             max_bin=max_bin
         )
-
-        unmix.load_state_dict(state)
+        
+        #print(unmix.input_mean)
+        unmix.load_state_dict(state) # mean and scale loaded here, fixed values
+        #print(unmix.input_mean)
         unmix.stft.center = True
         unmix.eval()
         unmix.to(device)
@@ -131,18 +135,21 @@ def separate(
 
     """
     # convert numpy audio to torch
+    #TOSEE: Why isn't it (nb_timesteps, nb_channels) but (1,nb_timesteps, nb_channels)?
+    # Why transpose?
     audio_torch = torch.tensor(audio.T[None, ...]).float().to(device)
-
+    #print("input size ",audio_torch.shape)
     source_names = []
-    V = []
+    V = [] # ????
 
-    for j, target in enumerate(tqdm.tqdm(targets)):
+    for j, target in enumerate(tqdm.tqdm(targets)): # tqdm for progress bar
         unmix_target = load_model(
             target=target,
             model_name=model_name,
             device=device
         )
         Vj = unmix_target(audio_torch).cpu().detach().numpy()
+        #print(Vj.shape)
         if softmask:
             # only exponentiate the model if we use softmask
             Vj = Vj**alpha
@@ -249,8 +256,10 @@ def test_main(
             always_2d=True,
             start=start,
             stop=stop
-        )
+        ) # audio is a numpy array with size (nb_timesteps, nb_channels)
+        #print(audio.shape)
 
+        #print(type(audio))
         if audio.shape[1] > 2:
             warnings.warn(
                 'Channel count > 2! '
@@ -275,7 +284,16 @@ def test_main(
             softmask=softmask,
             residual_model=residual_model,
             device=device
-        )
+        ) # is a dictionary
+        
+        
+        #print(estimates['vocals'].shape)
+        # returns a numpy array of shape (nb_timesteps, nb_channels).
+        # estimates has 4 keys being 'vocals', 'drums', 'bass', 'other'.
+        
+        #print(estimates.items())
+        
+        # Set in which folder the results should be put
         if not outdir:
             model_path = Path(model)
             if not model_path.exists():
@@ -359,7 +377,7 @@ if __name__ == '__main__':
 
     args, _ = parser.parse_known_args()
     args = inference_args(parser, args)
-
+    
     test_main(
         input_files=args.input, samplerate=args.samplerate,
         alpha=args.alpha, softmask=args.softmask, niter=args.niter,

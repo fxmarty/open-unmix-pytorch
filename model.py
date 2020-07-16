@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from scipy import signal # a enlever
+
 
 class NoOp(nn.Module):
     def __init__(self):
@@ -33,13 +35,17 @@ class STFT(nn.Module):
         Input: (nb_samples, nb_channels, nb_timesteps)
         Output:(nb_samples, nb_channels, nb_bins, nb_frames, 2)
         """
+        #print(x.shape)
 
         nb_samples, nb_channels, nb_timesteps = x.size()
-
+        
         # merge nb_samples and nb_channels for multichannel stft
         x = x.reshape(nb_samples*nb_channels, -1)
-
+        #print(x.shape)
         # compute stft with parameters as close as possible scipy settings
+        
+        #TOSEE: There are some weird stuff happening here with the temporal size
+        # T of the stft. Not sure to understand how it is zero-padded.
         stft_f = torch.stft(
             x,
             n_fft=self.n_fft, hop_length=self.n_hop,
@@ -47,11 +53,13 @@ class STFT(nn.Module):
             normalized=False, onesided=True,
             pad_mode='reflect'
         )
-
+        # Dim (nb_channels,nb_bin_freq,nb_frames,2)
+        
         # reshape back to channel dimension
         stft_f = stft_f.contiguous().view(
             nb_samples, nb_channels, self.n_fft // 2 + 1, -1, 2
         )
+        # Dim (1,2,nb_bin_freq,nb_frames,2)
         return stft_f
 
 
@@ -72,17 +80,16 @@ class Spectrogram(nn.Module):
         Output: Power/Mag Spectrogram
             (nb_frames, nb_samples, nb_channels, nb_bins)
         """
-        stft_f = stft_f.transpose(2, 3)
+        stft_f = stft_f.transpose(2, 3) # put nb_frames before nb_bins
         # take the magnitude
+        # -1 for the last column, we don't take the spectrogram at a power of 2
         stft_f = stft_f.pow(2).sum(-1).pow(self.power / 2.0)
 
         # downmix in the mag domain
         if self.mono:
             stft_f = torch.mean(stft_f, 1, keepdim=True)
-
         # permute output for LSTM convenience
         return stft_f.permute(2, 0, 1, 3)
-
 
 class OpenUnmix(nn.Module):
     def __init__(
@@ -108,12 +115,13 @@ class OpenUnmix(nn.Module):
         """
 
         super(OpenUnmix, self).__init__()
-
+        
         self.nb_output_bins = n_fft // 2 + 1
         if max_bin:
             self.nb_bins = max_bin
         else:
             self.nb_bins = self.nb_output_bins
+        
 
         self.hidden_size = hidden_size
 
@@ -162,14 +170,14 @@ class OpenUnmix(nn.Module):
         )
 
         self.bn3 = BatchNorm1d(self.nb_output_bins*nb_channels)
-
-        if input_mean is not None:
+        
+        if input_mean is not None: # How could it be not None?
             input_mean = torch.from_numpy(
                 -input_mean[:self.nb_bins]
             ).float()
         else:
             input_mean = torch.zeros(self.nb_bins)
-
+        
         if input_scale is not None:
             input_scale = torch.from_numpy(
                 1.0/input_scale[:self.nb_bins]
@@ -179,7 +187,7 @@ class OpenUnmix(nn.Module):
 
         self.input_mean = Parameter(input_mean)
         self.input_scale = Parameter(input_scale)
-
+                
         self.output_scale = Parameter(
             torch.ones(self.nb_output_bins).float()
         )
@@ -196,10 +204,11 @@ class OpenUnmix(nn.Module):
 
         mix = x.detach().clone()
 
-        # crop
+        # crop, because we don't necessarily keep all bins due to the bandwidth
         x = x[..., :self.nb_bins]
 
-        # shift and scale input to mean=0 std=1 (across all bins)
+        # shift and scale input to mean=0 std=1 (across all frames in one freq bin)
+        # Learnable paramaters (identical for all test files)
         x += self.input_mean
         x *= self.input_scale
 
@@ -237,5 +246,5 @@ class OpenUnmix(nn.Module):
 
         # since our output is non-negative, we can apply RELU
         x = F.relu(x) * mix
-
+        #print(x.shape)
         return x

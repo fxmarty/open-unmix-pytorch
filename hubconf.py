@@ -5,7 +5,6 @@ import torch.hub
 # Optional list of dependencies required by the package
 dependencies = ['torch', 'numpy']
 
-
 def umxhq(
     target='vocals', device='cpu', pretrained=True, *args, **kwargs
 ):
