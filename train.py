@@ -13,14 +13,24 @@ import random
 from git import Repo
 import os
 import copy
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
+import sys
 
+currentTime = datetime.now().strftime('%m-%d_%H:%M')
+writerTrainLoss = SummaryWriter(log_dir="runs/" + currentTime + "-train")
+writerValidationLoss = SummaryWriter(log_dir="runs/" + currentTime + "-validation")
 
 tqdm.monitor_interval = 0
+batch_seen = 0
+
 
 def train(args, unmix, device, train_sampler, optimizer):
     losses = utils.AverageMeter()
     unmix.train()
     pbar = tqdm.tqdm(train_sampler, disable=args.quiet)
+    global batch_seen
+    # Loop by number of tracks * number of samples per track / batch size
     for x, y in pbar:
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
@@ -30,6 +40,10 @@ def train(args, unmix, device, train_sampler, optimizer):
         loss = torch.nn.functional.mse_loss(Y_hat, Y)
         loss.backward()
         optimizer.step()
+        
+        batch_seen = batch_seen + 1 
+        writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
+        
         losses.update(loss.item(), Y.size(1))
     return losses.avg
 
@@ -37,6 +51,7 @@ def train(args, unmix, device, train_sampler, optimizer):
 def valid(args, unmix, device, valid_sampler):
     losses = utils.AverageMeter()
     unmix.eval()
+    global batch_seen
     with torch.no_grad():
         for x, y in valid_sampler:
             x, y = x.to(device), y.to(device)
@@ -44,6 +59,10 @@ def valid(args, unmix, device, valid_sampler):
             Y = unmix.transform(y)
             loss = torch.nn.functional.mse_loss(Y_hat, Y)
             losses.update(loss.item(), Y.size(1))
+        
+        print("Valid:",losses.avg)
+        writerValidationLoss.add_scalar('Loss', losses.avg,batch_seen)
+        
         return losses.avg
 
 
@@ -155,7 +174,20 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
-
+    print("Taille validation set:",len(valid_dataset))
+    print("Taille train set:",len(train_dataset))
+    # When working with MUSDB, train_dataset of type MUSDBDataset
+    # Pretty much a dataset of size samples_per_track * number of tracks,
+    # With each having both the mixture and the target source in stereo.
+    
+    # By definition of __getitem__ for MUSDBDataset in data.py, this is actually
+    # a random result at each call of __getitem__!
+    
+    # Returns torch.Size([2, 264600]) by default (2 for stereo, 264600 = 6*44100)
+    # In train_dataset[0][0], first 0 for number of sample, second 0 for the mixture
+    # (may be 1 for the target source)
+    #print("1er élément:",train_dataset[0][0].shape)
+    
     # create output dir if not exist
     target_path = Path(args.output)
     target_path.mkdir(parents=True, exist_ok=True)
@@ -164,6 +196,7 @@ def main():
         train_dataset, batch_size=args.batch_size, shuffle=True,
         **dataloader_kwargs
     )
+
     valid_sampler = torch.utils.data.DataLoader(
         valid_dataset, batch_size=1,
         **dataloader_kwargs
@@ -177,7 +210,7 @@ def main():
 
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth
-    )
+    ) # to stay under 16 000 Hz
 
     unmix = model.OpenUnmix(
         input_mean=scaler_mean,
@@ -228,8 +261,10 @@ def main():
         best_epoch = results['best_epoch']
         es.best = results['best_loss']
         es.num_bad_epochs = results['num_bad_epochs']
+    
     # else start from 0
     else:
+        print("Learning starts from 0")
         t = tqdm.trange(1, args.epochs + 1, disable=args.quiet)
         train_losses = []
         valid_losses = []
@@ -288,6 +323,8 @@ def main():
             print("Apply Early Stopping")
             break
 
+writerTrainLoss.close()
+writerValidationLoss.close()
 
 if __name__ == "__main__":
     main()

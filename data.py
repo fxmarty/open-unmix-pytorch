@@ -39,9 +39,14 @@ def _augment_channelswap(audio):
 
 def load_datasets(parser, args):
     """Loads the specified dataset from commandline arguments
-
+    
     Returns:
         train_dataset, validation_dataset
+    """
+    """
+    print(parser)
+    print("-----")
+    print(args)
     """
     if args.dataset == 'aligned':
         parser.add_argument('--input-file', type=str)
@@ -194,7 +199,7 @@ def load_datasets(parser, args):
             **dataset_kwargs
         )
 
-    elif args.dataset == 'musdb':
+    elif args.dataset == 'musdb': # Default case
         parser.add_argument('--is-wav', action='store_true', default=False,
                             help='loads wav instead of STEMS')
         parser.add_argument('--samples-per-track', type=int, default=64)
@@ -742,6 +747,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.samples_per_track = samples_per_track
         self.source_augmentations = source_augmentations
         self.random_track_mix = random_track_mix
+        #print("download:",download)
         self.mus = musdb.DB(
             root=root,
             is_wav=is_wav,
@@ -767,7 +773,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 if source == self.target:
                     target_ind = k
 
-                # select a random track
+                # select a random track.
                 if self.random_track_mix:
                     track = random.choice(self.mus.tracks)
 
@@ -814,6 +820,8 @@ class MUSDBDataset(torch.utils.data.Dataset):
         return x, y
 
     def __len__(self):
+        # self.mus.tracks : liste of the names of the tracks in train folder
+        # self.samples_per_track : parameter, default 64
         return len(self.mus.tracks) * self.samples_per_track
 
 
