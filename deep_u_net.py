@@ -1,10 +1,11 @@
-#import sys
-#sys.path.append("/home/felix/Documents/Mines/Césure/_Stage Télécom/open-unmix-pytorch/")
+import sys
+sys.path.append("/home/felix/Documents/Mines/Césure/_Stage Télécom/open-unmix-pytorch/")
 from model import Spectrogram, STFT, NoOp
 from torch.nn import LSTM, Linear, BatchNorm2d, Parameter
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchsummary import summary
 
 class deep_u_net(nn.Module):
     def __init__(
@@ -58,44 +59,46 @@ class deep_u_net(nn.Module):
         self.conv6 = nn.Conv2d(256, 512, kernel_size=5,stride=2,padding=2)
         self.bn6 = BatchNorm2d(512)
         
-        self.deconv7 = nn.ConvTranspose2d(512,256,kernel_size=5,stride=2,padding=2,output_padding=1)
+        self.deconv7 = nn.ConvTranspose2d(512,256,kernel_size=(5, 5),stride=2,padding=2,output_padding=(1,0))
         self.bn7 = BatchNorm2d(256)
         
         self.dropout1 = nn.Dropout2d(0.5)
         
-        self.deconv8 = nn.ConvTranspose2d(512,128,kernel_size=5,stride=2,padding=2,output_padding=1)
+        self.deconv8 = nn.ConvTranspose2d(512,128,kernel_size=5,stride=2,padding=2,output_padding=(1,0))
         self.bn8 = BatchNorm2d(128)
         
-        self.deconv9 = nn.ConvTranspose2d(256,64,kernel_size=5,stride=2,padding=2,output_padding=1)
+        self.deconv9 = nn.ConvTranspose2d(256,64,kernel_size=5,stride=2,padding=2,output_padding=(1,0))
         self.bn9 = BatchNorm2d(64)
         
-        self.deconv10 = nn.ConvTranspose2d(128,32,kernel_size=5,stride=2,padding=2,output_padding=1)
+        self.deconv10 = nn.ConvTranspose2d(128,32,kernel_size=5,stride=2,padding=2,output_padding=(1,0))
         self.bn10 = BatchNorm2d(32)
         
-        self.deconv11 = nn.ConvTranspose2d(64,16,kernel_size=5,stride=2,padding=2,output_padding=1)
+        self.deconv11 = nn.ConvTranspose2d(64,16,kernel_size=5,stride=2,padding=2,output_padding=(1,0))
         self.bn11 = BatchNorm2d(16)
         
-        self.deconv12 = nn.ConvTranspose2d(32,1,kernel_size=5,stride=2,padding=2,output_padding=1)
+        self.deconv12 = nn.ConvTranspose2d(32,1,kernel_size=5,stride=2,padding=2,output_padding=(1,0))
         self.bn12 = BatchNorm2d(1)
 
     def forward(self, mix):
         
         # transform to spectrogram on the fly
         x = self.transform(mix)
+        #print(x.shape)
+        
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
+        #print(x.shape)
         
-        # Size according to the paper, just for the testing (to be deleted)
-        x = x[:,:,:128,:512]
+        # Size according to the paper in nb of frames, just for the testing (to be deleted)
+        x = x[:128,:,:,:]
         
+        # reshape to the conventional shape for cnn in pytorch
+        x = x.reshape(nb_samples,nb_channels,128,nb_bins)
         x_original = x.detach().clone()
         
         # scale between 0 and 1
         xmax = torch.max(x)
         xmin = torch.min(x)
         x = (x - xmin)/(xmax-xmin)
-        
-        # reshape to the conventional shape for cnn in pytorch
-        x = x.reshape(nb_samples,nb_channels,nb_frames,nb_bins)
         
         # encoder path
         print(x.shape)
@@ -116,12 +119,13 @@ class deep_u_net(nn.Module):
         
         conv6 = self.bn6(F.leaky_relu(self.conv6(conv5),0.2))
         print(conv6.shape)
-        """
+        
+        
         # decoder path
         x = F.relu(self.dropout1(self.deconv7(conv6)))
         x = self.bn7(x)
         print(x.shape)
-        
+
         x = torch.cat((x,conv5),1)
         x = F.relu(self.dropout1(self.deconv8(x)))
         x = self.bn8(x)
@@ -147,8 +151,9 @@ class deep_u_net(nn.Module):
         # no batch normalization on this layer?
         print(x.shape)
         
+        print(x_original.shape)
         x = x * x_original
-        """
+        
         return x # return the magnitude spectrogram of the estimated source
 
 unmix = deep_u_net(
@@ -157,6 +162,9 @@ unmix = deep_u_net(
         nb_channels=1,
         sample_rate=8192
     )
+
 mix = (torch.rand(1, 1, 300000)+2)**2
 
 unmix.forward(mix)
+
+#summary(unmix, (1,300000))

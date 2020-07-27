@@ -33,7 +33,7 @@ class STFT(nn.Module):
         Output:(nb_samples, nb_channels, nb_bins, nb_frames, 2)
         """
         #print(x.shape)
-
+        
         nb_samples, nb_channels, nb_timesteps = x.size()
         
         # merge nb_samples and nb_channels for multichannel stft

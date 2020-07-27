@@ -168,7 +168,7 @@ def separate(
         V = norbert.residual_model(V, X, alpha if softmask else 1)
         source_names += (['residual'] if len(targets) > 1
                          else ['accompaniment'])
-
+    
     Y = norbert.wiener(V, X.astype(np.complex128), niter,
                        use_softmask=softmask)
 
@@ -233,7 +233,7 @@ def test_main(
     input_files=None, samplerate=44100, niter=1, alpha=1.0,
     softmask=False, residual_model=False, model='umxhq',
     targets=('vocals', 'drums', 'bass', 'other'),
-    outdir=None, start=0.0, duration=-1.0, no_cuda=False
+    outdir=None, start=0.0, duration=-1.0, no_cuda=False,model_name="open-unmix"
 ):
 
     use_cuda = not no_cuda and torch.cuda.is_available()
@@ -374,6 +374,13 @@ if __name__ == '__main__':
         default=False,
         help='disables CUDA inference'
     )
+    
+    parser.add_argument(
+        '--modelname',
+        default="open-unmix",
+        type=str,
+        help='model name, used to modify the testing procedure accordingly'
+    )
 
     args, _ = parser.parse_known_args()
     args = inference_args(parser, args)
@@ -383,5 +390,5 @@ if __name__ == '__main__':
         alpha=args.alpha, softmask=args.softmask, niter=args.niter,
         residual_model=args.residual_model, model=args.model,
         targets=args.targets, outdir=args.outdir, start=args.start,
-        duration=args.duration, no_cuda=args.no_cuda
+        duration=args.duration, no_cuda=args.no_cuda,model_name=args.modelname
     )
