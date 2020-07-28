@@ -1,5 +1,5 @@
-import sys
-sys.path.append("/home/felix/Documents/Mines/Césure/_Stage Télécom/open-unmix-pytorch/")
+#import sys
+#sys.path.append("/home/felix/Documents/Mines/Césure/_Stage Télécom/open-unmix-pytorch/")
 from model import Spectrogram, STFT, NoOp
 from torch.nn import LSTM, Linear, BatchNorm2d, Parameter
 import torch
@@ -18,9 +18,10 @@ class deep_u_net(nn.Module):
         sample_rate=44100,
     ):
         """
-        Input:  (batch, channel, sample)
-            or  (frame, batch, channels, frequency)
-        Output: (frame, batch, channels, frequency)
+        Input: (nb_samples, nb_channels, nb_timesteps)
+            or (nb_frames, nb_samples, nb_channels, nb_bins)
+        Output: Power/Mag Spectrogram
+                (nb_frames, nb_samples, nb_channels, nb_bins)
         """
 
         super(deep_u_net, self).__init__()
@@ -92,7 +93,7 @@ class deep_u_net(nn.Module):
         x = x[:128,:,:,:]
         
         # reshape to the conventional shape for cnn in pytorch
-        x = x.reshape(nb_samples,nb_channels,128,nb_bins)
+        x = torch.reshape(x,(nb_samples,nb_channels,128,nb_bins))
         x_original = x.detach().clone()
         
         # scale between 0 and 1
@@ -101,61 +102,62 @@ class deep_u_net(nn.Module):
         x = (x - xmin)/(xmax-xmin)
         
         # encoder path
-        print(x.shape)
+        #print(x.shape)
         conv1 = self.bn1(F.leaky_relu(self.conv1(x),0.2))
-        print(conv1.shape)
+        #print(conv1.shape)
         
         conv2 = self.bn2(F.leaky_relu(self.conv2(conv1),0.2))
-        print(conv2.shape)
+        #print(conv2.shape)
         
         conv3 = self.bn3(F.leaky_relu(self.conv3(conv2),0.2))
-        print(conv3.shape)
+        #print(conv3.shape)
         
         conv4 = self.bn4(F.leaky_relu(self.conv4(conv3),0.2))
-        print(conv4.shape)
+        #print(conv4.shape)
         
         conv5 = self.bn5(F.leaky_relu(self.conv5(conv4),0.2))
-        print(conv5.shape)
+        #print(conv5.shape)
         
         conv6 = self.bn6(F.leaky_relu(self.conv6(conv5),0.2))
-        print(conv6.shape)
+        #print(conv6.shape)
         
         
         # decoder path
         x = F.relu(self.dropout1(self.deconv7(conv6)))
         x = self.bn7(x)
-        print(x.shape)
+        #print(x.shape)
 
         x = torch.cat((x,conv5),1)
         x = F.relu(self.dropout1(self.deconv8(x)))
         x = self.bn8(x)
-        print(x.shape)
+        #print(x.shape)
         
         x = torch.cat((x,conv4),1)
         x = F.relu(self.dropout1(self.deconv9(x)))
         x = self.bn9(x)
-        print(x.shape)
+        #print(x.shape)
         
         x = torch.cat((x,conv3),1)
         x = F.relu(self.dropout1(self.deconv10(x)))
         x = self.bn10(x)
-        print(x.shape)
+        #print(x.shape)
         
         x = torch.cat((x,conv2),1)
         x = F.relu(self.dropout1(self.deconv11(x)))
         x = self.bn11(x)
-        print(x.shape)
+        #print(x.shape)
         
         x = torch.cat((x,conv1),1)
         x = torch.sigmoid(self.dropout1(self.deconv12(x)))
         # no batch normalization on this layer?
-        print(x.shape)
+        #print(x.shape)
         
-        print(x_original.shape)
+        #print(x_original.shape)
         x = x * x_original
         
-        return x # return the magnitude spectrogram of the estimated source
+        return x.permute(2,0,1,3) # return the magnitude spectrogram of the estimated source
 
+"""
 unmix = deep_u_net(
         n_fft=1024,
         n_hop=768,
@@ -168,3 +170,4 @@ mix = (torch.rand(1, 1, 300000)+2)**2
 unmix.forward(mix)
 
 #summary(unmix, (1,300000))
+"""

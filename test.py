@@ -7,14 +7,17 @@ import json
 from pathlib import Path
 import scipy.signal
 import resampy
+
 import model
+import deep_u_net
+
 import utils
 import warnings
 import tqdm
 from contextlib import redirect_stderr
 import io
 
-def load_model(target, model_name='umxhq', device='cpu'):
+def load_model(target, model_name='umxhq', device='cpu',model_name_general="open-unmix"):
     """
     target model path can be either <target>.pth, or <target>-sha256.pth
     (as used on torchub)
@@ -22,21 +25,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
     model_path = Path(model_name).expanduser()
 
     if not model_path.exists():
-        # model path does not exist, use hubconf model
-        try:
-            # disable progress bar
-            err = io.StringIO()
-            with redirect_stderr(err):
-                return torch.hub.load(
-                    'sigsep/open-unmix-pytorch',
-                    model_name,
-                    target=target,
-                    device=device,
-                    pretrained=True
-                ) # load pre-trained model from torch.hub
-            print(err.getvalue())
-        except AttributeError:
-            raise NameError('Model does not exist on torchhub')
+        raise NameError('Model path is wrong')
             # assume model is a path to a local model_name direcotry
     else:
         # load model from disk
@@ -57,20 +46,37 @@ def load_model(target, model_name='umxhq', device='cpu'):
         ) # returns the number of frequency bins so that their frequency is lower
         # than the bandwidth indicated in the .json files
 
-        unmix = model.OpenUnmix(
-            n_fft=results['args']['nfft'],
-            n_hop=results['args']['nhop'],
-            nb_channels=results['args']['nb_channels'],
-            hidden_size=results['args']['hidden_size'],
-            max_bin=max_bin
-        )
+        if model_name_general == "open-unmix":
+            unmix = model.OpenUnmix(
+                n_fft=results['args']['nfft'],
+                n_hop=results['args']['nhop'],
+                nb_channels=results['args']['nb_channels'],
+                hidden_size=results['args']['hidden_size'],
+                max_bin=max_bin
+            )
+            
+            #print(unmix.input_mean)
+            unmix.load_state_dict(state) # ???????? mean and scale loaded here, fixed values 
+            #print(unmix.input_mean)
+            unmix.stft.center = True
+            unmix.eval()
+            unmix.to(device)
         
-        #print(unmix.input_mean)
-        unmix.load_state_dict(state) # mean and scale loaded here, fixed values
-        #print(unmix.input_mean)
-        unmix.stft.center = True
-        unmix.eval()
-        unmix.to(device)
+        if model_name_general == "deep-u-net":
+            unmix = deep_u_net.deep_u_net(
+                n_fft=results['args']['nfft'],
+                n_hop=results['args']['nhop'],
+                nb_channels=results['args']['nb_channels'],
+                max_bin=max_bin
+            )
+            
+            #print(unmix.input_mean)
+            unmix.load_state_dict(state) # ???????? mean and scale loaded here, fixed values 
+            #print(unmix.input_mean)
+            unmix.stft.center = True
+            unmix.eval()
+            unmix.to(device)
+            
         return unmix
 
 
@@ -90,7 +96,8 @@ def separate(
     targets,
     model_name='umxhq',
     niter=1, softmask=False, alpha=1.0,
-    residual_model=False, device='cpu'
+    residual_model=False, device='cpu',
+    model_name_general="open-unmix"
 ):
     """
     Performing the separation on audio input
@@ -146,7 +153,8 @@ def separate(
         unmix_target = load_model(
             target=target,
             model_name=model_name,
-            device=device
+            device=device,
+            model_name_general=model_name_general
         )
         Vj = unmix_target(audio_torch).cpu().detach().numpy()
         #print(Vj.shape)
@@ -158,29 +166,52 @@ def separate(
         source_names += [target]
 
     V = np.transpose(np.array(V), (1, 3, 2, 0))
+    print("V:",V.shape) #mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
+    #print(V[40][40])
+    
 
     X = unmix_target.stft(audio_torch).detach().cpu().numpy()
+    print(X.shape)
     # convert to complex numpy type
     X = X[..., 0] + X[..., 1]*1j
+    print(X.shape)
     X = X[0].transpose(2, 1, 0)
-
-    if residual_model or len(targets) == 1:
-        V = norbert.residual_model(V, X, alpha if softmask else 1)
-        source_names += (['residual'] if len(targets) > 1
-                         else ['accompaniment'])
+    print("Final shape X:",X.shape) # shape (nb_frames, nb_bins, 2). Complex numbers
+    print(X[12][12])
     
-    Y = norbert.wiener(V, X.astype(np.complex128), niter,
-                       use_softmask=softmask)
-
     estimates = {}
-    for j, name in enumerate(source_names):
-        audio_hat = istft(
-            Y[..., j].T,
-            n_fft=unmix_target.stft.n_fft,
-            n_hopsize=unmix_target.stft.n_hop
-        )
-        estimates[name] = audio_hat.T
-
+    
+    if model_name_general == "open-unmix":
+        if residual_model or len(targets) == 1:
+            V = norbert.residual_model(V, X, alpha if softmask else 1)
+            source_names += (['residual'] if len(targets) > 1
+                            else ['accompaniment'])
+        
+        Y = norbert.wiener(V, X.astype(np.complex128), niter,
+                        use_softmask=softmask)
+        print("Final Y:",Y.shape) # shape (nb_frames, nb_bins, 2, nb_targets), complex
+        print(Y[40][40])
+        
+        for j, name in enumerate(source_names):
+            audio_hat = istft(
+                Y[..., j].T,
+                n_fft=unmix_target.stft.n_fft,
+                n_hopsize=unmix_target.stft.n_hop
+            )
+            estimates[name] = audio_hat.T
+    
+    if model_name_general == "deep-u-net": # without wiener filtering
+        phase_audio = np.angle(X)[...,np.newaxis]
+        Y = phase_audio[:128,:,:,:] * V
+        
+        for j, name in enumerate(source_names):
+            audio_hat = istft(
+                Y[..., j].T,
+                n_fft=unmix_target.stft.n_fft,
+                n_hopsize=unmix_target.stft.n_hop
+            )
+            estimates[name] = audio_hat.T
+    
     return estimates
 
 
@@ -233,7 +264,7 @@ def test_main(
     input_files=None, samplerate=44100, niter=1, alpha=1.0,
     softmask=False, residual_model=False, model='umxhq',
     targets=('vocals', 'drums', 'bass', 'other'),
-    outdir=None, start=0.0, duration=-1.0, no_cuda=False,model_name="open-unmix"
+    outdir=None, start=0.0, duration=-1.0, no_cuda=False,model_name_general="open-unmix"
 ):
 
     use_cuda = not no_cuda and torch.cuda.is_available()
@@ -283,7 +314,8 @@ def test_main(
             alpha=alpha,
             softmask=softmask,
             residual_model=residual_model,
-            device=device
+            device=device,
+            model_name_general=model_name_general
         ) # is a dictionary
         
         
@@ -390,5 +422,7 @@ if __name__ == '__main__':
         alpha=args.alpha, softmask=args.softmask, niter=args.niter,
         residual_model=args.residual_model, model=args.model,
         targets=args.targets, outdir=args.outdir, start=args.start,
-        duration=args.duration, no_cuda=args.no_cuda,model_name=args.modelname
+        duration=args.duration, no_cuda=args.no_cuda,model_name_general=args.modelname
     )
+
+#summary(unmix, (1,300000))

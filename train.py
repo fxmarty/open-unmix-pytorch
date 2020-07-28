@@ -1,12 +1,15 @@
 import argparse
+
 import model
+import deep_u_net
 import data
+import utils
+
 import torch
 import time
 from pathlib import Path
 import tqdm
 import json
-import utils
 import sklearn.preprocessing
 import numpy as np
 import random
@@ -25,7 +28,7 @@ tqdm.monitor_interval = 0
 batch_seen = 0
 
 
-def train(args, unmix, device, train_sampler, optimizer):
+def train(args, unmix, device, train_sampler, optimizer,model_name_general="open-unmix"):
     losses = utils.AverageMeter()
     unmix.train()
     pbar = tqdm.tqdm(train_sampler, disable=args.quiet)
@@ -35,8 +38,19 @@ def train(args, unmix, device, train_sampler, optimizer):
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
+        #print(x.shape)
         Y_hat = unmix(x)
-        Y = unmix.transform(y)
+        
+        if model_name_general == "open-unmix":
+            Y = unmix.transform(y)
+        
+        elif model_name_general == "deep-u-net":
+            # slice according to paper
+            Y = unmix.transform(y)[:128,:,:,:]
+            
+        #print("Y_hat shape:",Y_hat.shape)
+        #print("Y shape:",Y.shape)
+        
         loss = torch.nn.functional.mse_loss(Y_hat, Y)
         loss.backward()
         optimizer.step()
@@ -155,6 +169,13 @@ def main():
                         help='less verbose during training')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
+    
+    parser.add_argument(
+        '--modelname',
+        default="open-unmix",
+        type=str,
+        help='model name, used to modify the training procedure accordingly'
+    )
 
     args, _ = parser.parse_known_args()
 
@@ -186,6 +207,7 @@ def main():
     # Returns torch.Size([2, 264600]) by default (2 for stereo, 264600 = 6*44100)
     # In train_dataset[0][0], first 0 for number of sample, second 0 for the mixture
     # (may be 1 for the target source)
+   
     #print("1er élément:",train_dataset[0][0].shape)
     
     # create output dir if not exist
@@ -202,26 +224,36 @@ def main():
         **dataloader_kwargs
     )
 
-    if args.model:
-        scaler_mean = None
-        scaler_std = None
-    else:
-        scaler_mean, scaler_std = get_statistics(args, train_dataset)
-
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth
     ) # to stay under 16 000 Hz
 
-    unmix = model.OpenUnmix(
-        input_mean=scaler_mean,
-        input_scale=scaler_std,
-        nb_channels=args.nb_channels,
-        hidden_size=args.hidden_size,
-        n_fft=args.nfft,
-        n_hop=args.nhop,
-        max_bin=max_bin,
-        sample_rate=train_dataset.sample_rate
-    ).to(device)
+    if args.modelname == "open-unmix":
+        if args.model:
+            scaler_mean = None
+            scaler_std = None
+        else:
+            scaler_mean, scaler_std = get_statistics(args, train_dataset)
+        
+        unmix = model.OpenUnmix(
+            input_mean=scaler_mean,
+            input_scale=scaler_std,
+            nb_channels=args.nb_channels,
+            hidden_size=args.hidden_size,
+            n_fft=args.nfft,
+            n_hop=args.nhop,
+            max_bin=max_bin,
+            sample_rate=train_dataset.sample_rate
+        ).to(device)
+        
+    elif args.modelname == "deep-u-net":
+        unmix = deep_u_net.deep_u_net(
+            n_fft=args.nfft,
+            n_hop=args.nhop,
+            nb_channels=args.nb_channels,
+            max_bin=max_bin
+        ).to(device)
+        
 
     optimizer = torch.optim.Adam(
         unmix.parameters(),
@@ -274,7 +306,7 @@ def main():
     for epoch in t:
         t.set_description("Training Epoch")
         end = time.time()
-        train_loss = train(args, unmix, device, train_sampler, optimizer)
+        train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname)
         valid_loss = valid(args, unmix, device, valid_sampler)
         scheduler.step(valid_loss)
         train_losses.append(train_loss)

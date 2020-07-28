@@ -2,6 +2,7 @@ from torch.nn import LSTM, Linear, BatchNorm1d, Parameter
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchsummary import summary
 
 class NoOp(nn.Module):
     def __init__(self):
