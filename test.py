@@ -145,7 +145,7 @@ def separate(
     #TOSEE: Why isn't it (nb_timesteps, nb_channels) but (1,nb_timesteps, nb_channels)?
     # Why transpose?
     audio_torch = torch.tensor(audio.T[None, ...]).float().to(device)
-    #print("input size ",audio_torch.shape)
+    #print("Audio size ",audio_torch.shape) #(1,2,nb_time_points)
     source_names = []
     V = [] # ????
 

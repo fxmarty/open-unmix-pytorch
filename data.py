@@ -199,7 +199,44 @@ def load_datasets(parser, args):
             **dataset_kwargs
         )
 
-    elif args.dataset == 'musdb': # Default case
+    elif args.dataset == 'musdb' and modelname == 'open-unmix': # Default case
+        parser.add_argument('--is-wav', action='store_true', default=False,
+                            help='loads wav instead of STEMS')
+        parser.add_argument('--samples-per-track', type=int, default=64)
+        parser.add_argument(
+            '--source-augmentations', type=str, nargs='+',
+            default=['gain', 'channelswap']
+        )
+
+        args = parser.parse_args()
+        dataset_kwargs = {
+            'root': args.root,
+            'is_wav': args.is_wav,
+            'subsets': 'train',
+            'target': args.target,
+            'download': args.root is None,
+            'seed': args.seed
+        }
+
+        source_augmentations = Compose(
+            [globals()['_augment_' + aug] for aug in args.source_augmentations]
+        )
+
+        train_dataset = MUSDBDataset(
+            split='train',
+            samples_per_track=args.samples_per_track,
+            seq_duration=args.seq_dur,
+            source_augmentations=source_augmentations,
+            random_track_mix=True,
+            **dataset_kwargs
+        )
+
+        valid_dataset = MUSDBDataset(
+            split='valid', samples_per_track=1, seq_duration=None,
+            **dataset_kwargs
+        )
+        
+    elif args.dataset == 'musdb' and modelname == 'deep-u-net':
         parser.add_argument('--is-wav', action='store_true', default=False,
                             help='loads wav instead of STEMS')
         parser.add_argument('--samples-per-track', type=int, default=64)
@@ -884,7 +921,7 @@ class MUSDBDatasetDeepUNet(torch.utils.data.Dataset):
         """
         random.seed(seed)
         self.is_wav = is_wav
-        self.seq_duration = seq_duration
+        self.seq_duration = 3.05
         self.target = target
         self.subsets = subsets
         self.split = split
@@ -906,10 +943,10 @@ class MUSDBDatasetDeepUNet(torch.utils.data.Dataset):
     def __getitem__(self, index):
         audio_sources = []
         target_ind = None
-
+        
         # select track
         track = self.mus.tracks[index // self.samples_per_track]
-
+        extract_duration_nb_steps = 200100
         # at training time we assemble a custom mix
         if self.split == 'train' and self.seq_duration:
             for k, source in enumerate(self.mus.setup['sources']):

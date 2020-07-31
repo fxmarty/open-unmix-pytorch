@@ -2,7 +2,7 @@ from torch.nn import LSTM, Linear, BatchNorm1d, Parameter
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchsummary import summary
+from pytorch_model_summary import summary
 
 class NoOp(nn.Module):
     def __init__(self):
@@ -57,7 +57,7 @@ class STFT(nn.Module):
         stft_f = stft_f.contiguous().view(
             nb_samples, nb_channels, self.n_fft // 2 + 1, -1, 2
         )
-        # Dim (1,2,nb_bin_freq,nb_frames,2)
+
         return stft_f
 
 
@@ -201,10 +201,12 @@ class OpenUnmix(nn.Module):
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
 
         mix = x.detach().clone()
+        print(mix.shape)
 
         # crop, because we don't necessarily keep all bins due to the bandwidth
         x = x[..., :self.nb_bins]
-
+        print(x.shape)
+        
         # shift and scale input to mean=0 std=1 (across all frames in one freq bin)
         # Learnable paramaters (identical for all test files)
         x += self.input_mean
@@ -234,15 +236,32 @@ class OpenUnmix(nn.Module):
         # second dense stage + layer norm
         x = self.fc3(x)
         x = self.bn3(x)
-
+        
+        #print(x.shape)
         # reshape back to original dim
         x = x.reshape(nb_frames, nb_samples, nb_channels, self.nb_output_bins)
 
         # apply output scaling
         x *= self.output_scale
         x += self.output_mean
-
+        
+        #print(x.shape)
         # since our output is non-negative, we can apply RELU
         x = F.relu(x) * mix
         #print(x.shape)
         return x
+
+if __name__ == '__main__':
+    import numpy as np
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    umx = OpenUnmix(
+        nb_channels=2,
+        sample_rate=44100,
+        max_bin = 1013
+        ).to(device)
+        
+    #print(umx)
+    print(summary(umx, torch.zeros((1,2,220500)).to(device), show_input=True))
+    
+    #demucs.forward(torch.Tensor(np.ones((1,2,220550))).to(device))
