@@ -4,8 +4,24 @@ from model import Spectrogram, STFT, NoOp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch_model_summary import summary
+import pytorch_model_summary
+from torchsummary import summary
 import math
+
+def valid_length(length):
+    """
+    Return the nearest valid length to use with the model so that
+    there is no time steps left over in a convolutions, e.g. for all
+    layers, size of the (input - kernel_size) % stride = 0.
+
+    For training, extracts should have a valid length.
+    """
+    for _ in range(6):
+        length = math.ceil((length - 5) / 2) + 1
+    for _ in range(6):
+        length = (length - 1) * 2 + 5
+
+    return int(length)
 
 def conv_block(in_chans,out_chans):
     return nn.Sequential(
@@ -82,15 +98,8 @@ class Deep_u_net(nn.Module):
         else:
             self.transform = nn.Sequential(self.stft, self.spec)
         
-        self.nb_output_bins = n_fft // 2 + 1
-        if max_bin:
-            self.nb_bins = max_bin # Bandwidth should be 8192 Hz according to the
-            # paper, very arbitrary choice.
-        else:
-            self.nb_bins = self.nb_output_bins
         
         self.encoder = nn.ModuleList()
-        
         self.encoder.append(conv_block(nb_channels,16))
         
         for i in range(0,5):
@@ -99,7 +108,6 @@ class Deep_u_net(nn.Module):
         
         self.decoder = nn.ModuleList()
         self.decoder.append(deconv_block(16*2**5,16*2**4,dropout=True))
-        
         for i in range(5,3,-1):
             in_chans = 16*2**i
             self.decoder.append(deconv_block(in_chans,in_chans//4,dropout=True))
@@ -110,35 +118,13 @@ class Deep_u_net(nn.Module):
         
         self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation="sigmoid",batchnorm=False)) # stereo output
     
-    def valid_length(self, length):
-        """
-        Return the nearest valid length to use with the model so that
-        there is no time steps left over in a convolutions, e.g. for all
-        layers, size of the (input - kernel_size) % stride = 0.
-
-        For training, extracts should have a valid length.
-        """
-        for _ in range(6):
-            length = math.ceil((length - 5) / 2) + 1
-            #length = max(1, length)
-            #length += self.context - 1
-        for _ in range(6):
-            length = (length - 1) * 2 + 5
-
-        return int(length)
 
     def forward(self, mix):
-        
         # transform to spectrogram on the fly
         x = self.transform(mix)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
         
         #print(x.shape)
-        
-        # Size according to the paper in nb of frames, just for the testing (to be deleted)
-        print(x.shape)
-        #x = x[:256,:,:,:]
-        print(x.shape)
         # reshape to the conventional shape for cnn in pytorch
         x = torch.reshape(x,(nb_samples,nb_channels,-1,nb_bins))
         
@@ -148,7 +134,6 @@ class Deep_u_net(nn.Module):
         xmax = torch.max(x)
         xmin = torch.min(x)
         x = (x - xmin)/(xmax-xmin)
-        print(x.shape)
         
         saved = []
         saved_pad = []
@@ -156,53 +141,52 @@ class Deep_u_net(nn.Module):
             #print("Before padding:",x.shape)
             perfectPad = padPerfectly(5,x.shape[-2],x.shape[-1],2)
             saved_pad.append(perfectPad)
-            print("SAVED PAD:",perfectPad)
-            print("Before padding encoder:",x.shape)
+            #print("SAVED PAD:",perfectPad)
+            #print("Before padding encoder:",x.shape)
             x = F.pad(x,perfectPad)
             saved.append(x)
-            print("SAVED:",x.shape)
-            print("After padding encoder:",x.shape)
+            #print("SAVED:",x.shape)
+            #print("After padding encoder:",x.shape)
             x = encode(x)
-            print("----CONVOL")
+            #print("----CONVOL")
         
         saved_pad.append((0,0,0,0)) # after the last convolution, we do not pad
-        print("SAVED PAD:",(0,0,0,0))
-        print("debut decoder:",x.shape)
+        #print("SAVED PAD:",(0,0,0,0))
+        #print("debut decoder:",x.shape)
         for decode in self.decoder:
             beforeDeconv = decode[0]
             afterDeconv = decode[1]
-            print(x.shape)
-            
+            #print(x.shape)
             
             pad_w_l,pad_w_r,pad_h_l,pad_h_r = saved_pad.pop()
-            print("Before slicing:",x.shape)
+            #print("Before slicing:",x.shape)
             x = x[...,pad_h_l:-pad_h_r or None,pad_w_l:-pad_w_r or None]
-            print("After slicing:",x.shape)
+            #print("After slicing:",x.shape)
             
             #x = x[...,pad_h_l:-pad_h_r or None,pad_w_l:-pad_w_r or None]
             
             x = beforeDeconv(x)
             
-            print("After deconv:",x.shape)
+            #print("After deconv:",x.shape)
             x = afterDeconv(x)
             
             #print("decoded:",x.shape)
             if len(saved) > 1:
-                print(x.shape)
+                #print(x.shape)
                 y = saved.pop(-1)
                 x = torch.cat((x,y),1)
                 #print(x.shape)
             
             
-            print(x.shape)
-            print("----")
+            #print(x.shape)
+            #print("----")
         
         #print(x.shape)
         
         pad_w_l,pad_w_r,pad_h_l,pad_h_r = saved_pad.pop()
-        print("Before slicing:",x.shape)
+        #print("Before slicing:",x.shape)
         x = x[...,pad_h_l:-pad_h_r or None,pad_w_l:-pad_w_r or None]
-        print("After slicing:",x.shape)
+        #print("After slicing:",x.shape)
 
         
         x = x * x_original
@@ -219,13 +203,10 @@ if __name__ == '__main__':
         sample_rate=44100
         ).to(device)
         
-    #print(deep_u_net)
-    print(deep_u_net.valid_length(2000))
-    
-    mix = (torch.rand(1, 2, 265216)+2)**2
+    #print(deep_u_net)    
+    mix = (torch.rand(1, 2, 262144)+2)**2
     mix = mix.to(device)
     #deep_u_net.forward(mix)
     
-    print(summary(deep_u_net, mix, show_input=False))
-    
-    #demucs.forward(torch.Tensor(np.ones((1,2,220550))).to(device))
+    print(pytorch_model_summary.summary(deep_u_net, mix, show_input=False))
+    #summary(deep_u_net, input_size=(2, 262144),batch_size=16)

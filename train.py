@@ -20,6 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 import sys
 
+
 currentTime = datetime.now().strftime('%m-%d_%H:%M')
 writerTrainLoss = SummaryWriter(log_dir="runs/" + currentTime + "-train")
 writerValidationLoss = SummaryWriter(log_dir="runs/" + currentTime + "-validation")
@@ -40,13 +41,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general="open
         optimizer.zero_grad()
         #print(x.shape)
         Y_hat = unmix(x)
-        
-        if model_name_general == "open-unmix":
-            Y = unmix.transform(y)
-        
-        elif model_name_general == "deep-u-net":
-            # slice according to paper
-            Y = unmix.transform(y)[:128,:,:,:]
+        Y = unmix.transform(y)
             
         #print("Y_hat shape:",Y_hat.shape)
         #print("Y shape:",Y.shape)
@@ -195,8 +190,12 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
+    if args.modelname == "deep-u-net":
+        print("WARNING: Be warned that the sequence length has been overridden to 262144 times points, i.e. ~5,94 s.")
+        
     print("Taille validation set:",len(valid_dataset))
     print("Taille train set:",len(train_dataset))
+    
     # When working with MUSDB, train_dataset of type MUSDBDataset
     # Pretty much a dataset of size samples_per_track * number of tracks,
     # With each having both the mixture and the target source in stereo.
@@ -207,15 +206,21 @@ def main():
     # Returns torch.Size([2, 264600]) by default (2 for stereo, 264600 = 6*44100)
     # In train_dataset[0][0], first 0 for number of sample, second 0 for the mixture
     # (may be 1 for the target source)
-   
-    #print("1er élément:",train_dataset[0][0].shape)
+    
+    print("len(train_dataset):",len(train_dataset))
+    print("len(train_dataset[0]):",len(train_dataset[0]))
+    print("1er élément:",train_dataset[0][0].shape)
+    
+    print(train_dataset[0][0])
+    print(train_dataset[0][0])
     
     # create output dir if not exist
     target_path = Path(args.output)
     target_path.mkdir(parents=True, exist_ok=True)
 
+    # A CHANGEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEER
     train_sampler = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True,
+        train_dataset, batch_size=args.batch_size, shuffle=False,
         **dataloader_kwargs
     )
 
@@ -223,7 +228,27 @@ def main():
         valid_dataset, batch_size=1,
         **dataloader_kwargs
     )
-
+    
+    examples = enumerate(train_sampler)
+    example = next(examples)
+    
+    batch_idx, (example_data, example_targets) = example
+    print(example_data[0])
+    
+    example = next(examples)
+    batch_idx2, (example_data2, example_targets2) = example
+    print(example_data2[0])
+    
+    example_data2
+    
+    """
+    for batch in train_sampler:
+        example_data, example_targets = batch
+        print(example_data.shape)
+        print(example_targets.shape)
+        print("-----")
+    """
+    """
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth
     ) # to stay under 16 000 Hz
@@ -247,14 +272,14 @@ def main():
         ).to(device)
         
     elif args.modelname == "deep-u-net":
-        unmix = deep_u_net.deep_u_net(
+        unmix = deep_u_net.Deep_u_net(
             n_fft=args.nfft,
             n_hop=args.nhop,
             nb_channels=args.nb_channels,
             max_bin=max_bin
         ).to(device)
         
-
+    
     optimizer = torch.optim.Adam(
         unmix.parameters(),
         lr=args.lr,
@@ -315,7 +340,9 @@ def main():
         t.set_postfix(
             train_loss=train_loss, val_loss=valid_loss
         )
-
+        
+        print("Epoch ",epoch,", train loss: ",train_loss)
+        
         stop = es.step(valid_loss)
 
         if valid_loss == es.best:
@@ -354,7 +381,7 @@ def main():
         if stop:
             print("Apply Early Stopping")
             break
-
+    """
 writerTrainLoss.close()
 writerValidationLoss.close()
 

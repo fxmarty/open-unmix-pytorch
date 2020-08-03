@@ -2,7 +2,8 @@ from torch.nn import LSTM, Linear, BatchNorm1d, Parameter
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch_model_summary import summary
+import pytorch_model_summary
+from torchsummary import summary
 
 class NoOp(nn.Module):
     def __init__(self):
@@ -248,7 +249,7 @@ class OpenUnmix(nn.Module):
         #print(x.shape)
         # since our output is non-negative, we can apply RELU
         x = F.relu(x) * mix
-        #print(x.shape)
+        print(x.shape)
         return x
 
 if __name__ == '__main__':
@@ -262,6 +263,8 @@ if __name__ == '__main__':
         ).to(device)
         
     #print(umx)
-    print(summary(umx, torch.zeros((1,2,220500)).to(device), show_input=True))
+    data = torch.zeros((32,2,220500)).to(device)
+    print(pytorch_model_summary.summary(umx, data, show_input=True))
     
+    #summary(umx, input_data=data,batch_dim=1)
     #demucs.forward(torch.Tensor(np.ones((1,2,220550))).to(device))
