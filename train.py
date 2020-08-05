@@ -21,15 +21,10 @@ from datetime import datetime
 import sys
 
 
-currentTime = datetime.now().strftime('%m-%d_%H:%M')
-writerTrainLoss = SummaryWriter(log_dir="runs/" + currentTime + "-train")
-writerValidationLoss = SummaryWriter(log_dir="runs/" + currentTime + "-validation")
-
 tqdm.monitor_interval = 0
 batch_seen = 0
 
-
-def train(args, unmix, device, train_sampler, optimizer,model_name_general="open-unmix"):
+def train(args, unmix, device, train_sampler, optimizer,model_name_general="open-unmix",tb="no"):
     losses = utils.AverageMeter()
     unmix.train()
     pbar = tqdm.tqdm(train_sampler, disable=args.quiet)
@@ -39,25 +34,22 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general="open
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        #print(x.shape)
         Y_hat = unmix(x)
         Y = unmix.transform(y)
-            
-        #print("Y_hat shape:",Y_hat.shape)
-        #print("Y shape:",Y.shape)
-        
+                    
         loss = torch.nn.functional.mse_loss(Y_hat, Y)
         loss.backward()
         optimizer.step()
         
-        batch_seen = batch_seen + 1 
-        writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
+        if tb == "yes":
+            batch_seen = batch_seen + 1 
+            writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
         
         losses.update(loss.item(), Y.size(1))
     return losses.avg
 
 
-def valid(args, unmix, device, valid_sampler):
+def valid(args, unmix, device, valid_sampler,tb="no"):
     losses = utils.AverageMeter()
     unmix.eval()
     global batch_seen
@@ -69,8 +61,9 @@ def valid(args, unmix, device, valid_sampler):
             loss = torch.nn.functional.mse_loss(Y_hat, Y)
             losses.update(loss.item(), Y.size(1))
         
-        print("Valid:",losses.avg)
-        writerValidationLoss.add_scalar('Loss', losses.avg,batch_seen)
+        if tb == "yes":
+            print("Valid:",losses.avg)
+            writerValidationLoss.add_scalar('Loss', losses.avg,batch_seen)
         
         return losses.avg
 
@@ -171,6 +164,15 @@ def main():
         type=str,
         help='model name, used to modify the training procedure accordingly'
     )
+    
+    parser.add_argument(
+        '--data-augmentation',
+        default="yes",
+        type=str,
+        help='Change data generation to allow data augmentation between epochs or not'
+    )
+    
+    parser.add_argument('--tb', default="no",help='use tensorboard')
 
     args, _ = parser.parse_known_args()
 
@@ -190,11 +192,23 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
+    
     if args.modelname == "deep-u-net":
         print("WARNING: Be warned that the sequence length has been overridden to 262144 times points, i.e. ~5,94 s.")
-        
+    
+    if args.data_augmentation == "no":
+        print("WARNING: Data augmentation has been disabled.")
+    
+    if args.tb == "yes":
+        currentTime = datetime.now().strftime('%m-%d_%H:%M')
+        global writerTrainLoss
+        global writerValidationLoss
+        writerTrainLoss = SummaryWriter(log_dir="runs/" + currentTime + "-train")
+        writerValidationLoss = SummaryWriter(log_dir="runs/" + currentTime + "-validation")
+
     print("Taille validation set:",len(valid_dataset))
     print("Taille train set:",len(train_dataset))
+    print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
     
     # When working with MUSDB, train_dataset of type MUSDBDataset
     # Pretty much a dataset of size samples_per_track * number of tracks,
@@ -207,20 +221,18 @@ def main():
     # In train_dataset[0][0], first 0 for number of sample, second 0 for the mixture
     # (may be 1 for the target source)
     
+    
     print("len(train_dataset):",len(train_dataset))
     print("len(train_dataset[0]):",len(train_dataset[0]))
-    print("1er élément:",train_dataset[0][0].shape)
-    
-    print(train_dataset[0][0])
-    print(train_dataset[0][0])
-    
+    print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
+        
     # create output dir if not exist
     target_path = Path(args.output)
     target_path.mkdir(parents=True, exist_ok=True)
-
-    # A CHANGEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEER
+    
+    
     train_sampler = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=False,
+        train_dataset, batch_size=args.batch_size, shuffle=True,
         **dataloader_kwargs
     )
 
@@ -228,27 +240,26 @@ def main():
         valid_dataset, batch_size=1,
         **dataloader_kwargs
     )
+        
+    """
+    examples = enumerate(train_sampler)
+    example = next(examples)
+    batch_idx, (example_data, example_targets) = example
+    print(example_data[5])
     
     examples = enumerate(train_sampler)
     example = next(examples)
-    
     batch_idx, (example_data, example_targets) = example
-    print(example_data[0])
+    print(example_data[5])
     
-    example = next(examples)
-    batch_idx2, (example_data2, example_targets2) = example
-    print(example_data2[0])
-    
-    example_data2
-    
-    """
     for batch in train_sampler:
         example_data, example_targets = batch
         print(example_data.shape)
         print(example_targets.shape)
         print("-----")
     """
-    """
+    
+    
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth
     ) # to stay under 16 000 Hz
@@ -275,8 +286,7 @@ def main():
         unmix = deep_u_net.Deep_u_net(
             n_fft=args.nfft,
             n_hop=args.nhop,
-            nb_channels=args.nb_channels,
-            max_bin=max_bin
+            nb_channels=args.nb_channels
         ).to(device)
         
     
@@ -331,8 +341,10 @@ def main():
     for epoch in t:
         t.set_description("Training Epoch")
         end = time.time()
-        train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname)
-        valid_loss = valid(args, unmix, device, valid_sampler)
+        
+        train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,tb=args.tb)
+        valid_loss = valid(args, unmix, device, valid_sampler,tb=args.tb)
+        
         scheduler.step(valid_loss)
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)
@@ -381,9 +393,10 @@ def main():
         if stop:
             print("Apply Early Stopping")
             break
-    """
-writerTrainLoss.close()
-writerValidationLoss.close()
+        
+    if args.tb == "yes":
+        writerTrainLoss.close()
+        writerValidationLoss.close()
 
 if __name__ == "__main__":
     main()

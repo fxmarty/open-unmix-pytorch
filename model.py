@@ -202,11 +202,11 @@ class OpenUnmix(nn.Module):
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
 
         mix = x.detach().clone()
-        print(mix.shape)
+        #print(mix.shape)
 
         # crop, because we don't necessarily keep all bins due to the bandwidth
         x = x[..., :self.nb_bins]
-        print(x.shape)
+        #print(x.shape)
         
         # shift and scale input to mean=0 std=1 (across all frames in one freq bin)
         # Learnable paramaters (identical for all test files)
@@ -249,7 +249,7 @@ class OpenUnmix(nn.Module):
         #print(x.shape)
         # since our output is non-negative, we can apply RELU
         x = F.relu(x) * mix
-        print(x.shape)
+        #print(x.shape)
         return x
 
 if __name__ == '__main__':

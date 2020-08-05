@@ -220,7 +220,7 @@ def load_datasets(parser, args):
         source_augmentations = Compose(
             [globals()['_augment_' + aug] for aug in args.source_augmentations]
         )
-
+        
         train_dataset = MUSDBDataset(
             modelname = args.modelname,
             split='train',
@@ -228,6 +228,7 @@ def load_datasets(parser, args):
             seq_duration=args.seq_dur,
             source_augmentations=source_augmentations,
             random_track_mix=True,
+            data_augmentation=args.data_augmentation,
             **dataset_kwargs
         )
 
@@ -697,6 +698,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         random_track_mix=False,
         dtype=torch.float32,
         seed=42,
+        data_augmentation="yes",
         *args, **kwargs
     ):
         """MUSDB18 torch.data.Dataset that samples from the MUSDB tracks
@@ -749,6 +751,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.samples_per_track = samples_per_track
         self.source_augmentations = source_augmentations
         self.random_track_mix = random_track_mix
+        self.data_augmentation = data_augmentation
         #print("download:",download)
         self.mus = musdb.DB(
             root=root,
@@ -761,7 +764,17 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.sample_rate = 44100  # musdb is fixed sample rate
         self.dtype = dtype
 
-        def __getitem__(self, index):
+        if self.data_augmentation == "no":
+            self.dataindex = torch.zeros(len(self.mus),self.samples_per_track)
+            
+            for i in range(len(self.mus)):
+                track = self.mus.tracks[i]
+                for j in range(self.samples_per_track):
+                    chunk_start = random.uniform(0,
+                                            track.duration - self.seq_duration)
+                    self.dataindex[i][j] = chunk_start
+                    
+    def __getitem__(self, index):
         audio_sources = []
         target_ind = None
 
@@ -769,7 +782,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         track = self.mus.tracks[index // self.samples_per_track]
 
         # at training time we assemble a custom mix
-        if self.split == 'train' and self.seq_duration:
+        if self.split == 'train' and self.seq_duration and self.data_augmentation == "yes":
             for k, source in enumerate(self.mus.setup['sources']):
                 # memorize index of target source
                 if source == self.target:
@@ -809,6 +822,44 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 vocind = list(self.mus.setup['sources'].keys()).index('vocals')
                 # apply time domain subtraction
                 y = x - stems[vocind]
+        
+        # Case without source augmentation
+        elif self.split == 'train' and self.seq_duration and self.data_augmentation == "no":     
+
+            for k, source in enumerate(self.mus.setup['sources']):
+                # memorize index of target source
+                if source == self.target:
+                    target_ind = k
+
+                # set the excerpt duration
+                track.chunk_duration = self.seq_duration
+                # set random start position
+                #print(k)
+                track.chunk_start = self.dataindex[index // self.samples_per_track][index % self.samples_per_track].item()
+
+                audio = torch.tensor(
+                    track.sources[source].audio.T,
+                    dtype=self.dtype
+                )
+                
+                if self.modelname == "deep-u-net":
+                    audio = audio[...,:262144]
+                
+                audio_sources.append(audio)
+
+            # create stem tensor of shape (source, channel, samples)
+            stems = torch.stack(audio_sources, dim=0)
+            # # apply linear mix over source index=0
+            x = stems.sum(0)
+            # get the target stem
+            if target_ind is not None:
+                y = stems[target_ind]
+            # assuming vocal/accompaniment scenario if target!=source
+            else:
+                vocind = list(self.mus.setup['sources'].keys()).index('vocals')
+                # apply time domain subtraction
+                y = x - stems[vocind]
+
 
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track

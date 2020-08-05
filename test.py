@@ -63,11 +63,10 @@ def load_model(target, model_name='umxhq', device='cpu',model_name_general="open
             unmix.to(device)
         
         if model_name_general == "deep-u-net":
-            unmix = deep_u_net.deep_u_net(
+            unmix = deep_u_net.Deep_u_net(
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
-                nb_channels=results['args']['nb_channels'],
-                max_bin=max_bin
+                nb_channels=results['args']['nb_channels']
             )
             
             #print(unmix.input_mean)
@@ -166,21 +165,22 @@ def separate(
         source_names += [target]
 
     V = np.transpose(np.array(V), (1, 3, 2, 0))
-    print("V:",V.shape) #mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
+    #print("V:",V.shape) #mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
     #print(V[40][40])
     
 
     X = unmix_target.stft(audio_torch).detach().cpu().numpy()
-    print(X.shape)
+    #print(X.shape)
     # convert to complex numpy type
     X = X[..., 0] + X[..., 1]*1j
-    print(X.shape)
+    #print(X.shape)
     X = X[0].transpose(2, 1, 0)
-    print("Final shape X:",X.shape) # shape (nb_frames, nb_bins, 2). Complex numbers
-    print(X[12][12])
+    #print("Final shape X:",X.shape) # shape (nb_frames, nb_bins, 2). Complex numbers
+    #print(X[12][12])
     
     estimates = {}
     
+    """
     if model_name_general == "open-unmix":
         if residual_model or len(targets) == 1:
             V = norbert.residual_model(V, X, alpha if softmask else 1)
@@ -189,8 +189,8 @@ def separate(
         
         Y = norbert.wiener(V, X.astype(np.complex128), niter,
                         use_softmask=softmask)
-        print("Final Y:",Y.shape) # shape (nb_frames, nb_bins, 2, nb_targets), complex
-        print(Y[40][40])
+        #print("Final Y:",Y.shape) # shape (nb_frames, nb_bins, 2, nb_targets), complex
+        #print(Y[40][40])
         
         for j, name in enumerate(source_names):
             audio_hat = istft(
@@ -199,10 +199,10 @@ def separate(
                 n_hopsize=unmix_target.stft.n_hop
             )
             estimates[name] = audio_hat.T
-    
-    if model_name_general == "deep-u-net": # without wiener filtering
+    """
+    if model_name_general == "deep-u-net" or model_name_general == "open-unmix": # without wiener filtering
         phase_audio = np.angle(X)[...,np.newaxis]
-        Y = phase_audio[:128,:,:,:] * V
+        Y = phase_audio * V
         
         for j, name in enumerate(source_names):
             audio_hat = istft(
