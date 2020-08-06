@@ -41,7 +41,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general="open
         loss.backward()
         optimizer.step()
         
-        if tb == "yes":
+        if tb is not None:
             batch_seen = batch_seen + 1 
             writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
         
@@ -61,7 +61,7 @@ def valid(args, unmix, device, valid_sampler,tb="no"):
             loss = torch.nn.functional.mse_loss(Y_hat, Y)
             losses.update(loss.item(), Y.size(1))
         
-        if tb == "yes":
+        if tb is not None:
             print("Valid:",losses.avg)
             writerValidationLoss.add_scalar('Loss', losses.avg,batch_seen)
         
@@ -160,7 +160,7 @@ def main():
     
     parser.add_argument(
         '--modelname',
-        default="open-unmix",
+        choices=['open-unmix', 'deep-u-net'],
         type=str,
         help='model name, used to modify the training procedure accordingly'
     )
@@ -168,14 +168,34 @@ def main():
     parser.add_argument(
         '--data-augmentation',
         default="yes",
+        choices=['yes', 'no'],
         type=str,
         help='Change data generation to allow data augmentation between epochs or not'
     )
     
-    parser.add_argument('--tb', default="no",help='use tensorboard')
+    parser.add_argument(
+        '--normalization-style',
+        choices=['overall', 'batch-specific'],
+        type=str,
+        help='Use different normalization styles than the default for a model.'
+    )
+    
+    parser.add_argument('--tb', default=None,
+                        help='use tensorboard, and if so, set name')
 
     args, _ = parser.parse_known_args()
-
+    
+    # Make normalization-style argument not mendatory
+    if args.normalization_style == None and args.modelname == "open-unmix":
+        args.normalization_style = "overall"
+        print("Normalization style set by default to \""
+                + args.normalization_style + "\"."
+    
+    if args.normalization_style == None and args.modelname == "deep-u-net":
+        args.normalization_style = "batch-specific"
+        print("Normalization style set by default to \""
+                + args.normalization_style + "\"."
+    
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     print("Using GPU:", use_cuda)
     print("Using Torchaudio: ", utils._torchaudio_available())
@@ -191,6 +211,7 @@ def main():
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
+    # Load and process training and validation sets
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
     
     if args.modelname == "deep-u-net":
@@ -199,29 +220,10 @@ def main():
     if args.data_augmentation == "no":
         print("WARNING: Data augmentation has been disabled.")
     
-    if args.tb == "yes":
-        currentTime = datetime.now().strftime('%m-%d_%H:%M')
-        global writerTrainLoss
-        global writerValidationLoss
-        writerTrainLoss = SummaryWriter(log_dir="runs/" + currentTime + "-train")
-        writerValidationLoss = SummaryWriter(log_dir="runs/" + currentTime + "-validation")
-
     print("Taille validation set:",len(valid_dataset))
     print("Taille train set:",len(train_dataset))
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
-    
-    # When working with MUSDB, train_dataset of type MUSDBDataset
-    # Pretty much a dataset of size samples_per_track * number of tracks,
-    # With each having both the mixture and the target source in stereo.
-    
-    # By definition of __getitem__ for MUSDBDataset in data.py, this is actually
-    # a random result at each call of __getitem__!
-    
-    # Returns torch.Size([2, 264600]) by default (2 for stereo, 264600 = 6*44100)
-    # In train_dataset[0][0], first 0 for number of sample, second 0 for the mixture
-    # (may be 1 for the target source)
-    
-    
+        
     print("len(train_dataset):",len(train_dataset))
     print("len(train_dataset[0]):",len(train_dataset[0]))
     print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
@@ -229,7 +231,6 @@ def main():
     # create output dir if not exist
     target_path = Path(args.output)
     target_path.mkdir(parents=True, exist_ok=True)
-    
     
     train_sampler = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
@@ -259,7 +260,6 @@ def main():
         print("-----")
     """
     
-    
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth
     ) # to stay under 16 000 Hz
@@ -272,6 +272,7 @@ def main():
             scaler_mean, scaler_std = get_statistics(args, train_dataset)
         
         unmix = model.OpenUnmix(
+            normalization_style=args.normalization_style,
             input_mean=scaler_mean,
             input_scale=scaler_std,
             nb_channels=args.nb_channels,
@@ -284,12 +285,12 @@ def main():
         
     elif args.modelname == "deep-u-net":
         unmix = deep_u_net.Deep_u_net(
+            normalization_style=args.normalization_style,
             n_fft=args.nfft,
             n_hop=args.nhop,
             nb_channels=args.nb_channels
         ).to(device)
         
-    
     optimizer = torch.optim.Adam(
         unmix.parameters(),
         lr=args.lr,
@@ -304,7 +305,16 @@ def main():
     )
 
     es = utils.EarlyStopping(patience=args.patience)
-
+    
+    # Use tensorboard if specified as an argument
+    if args.tb is not None:
+        currentDay = datetime.now().strftime('%m-%d_')
+        currentHour = datetime.now().strftime('_%H:%M_')
+        global writerTrainLoss
+        global writerValidationLoss
+        writerTrainLoss = SummaryWriter(log_dir="runs/" + currentDay + args.tb + currentHour + "train")
+        writerValidationLoss = SummaryWriter(log_dir="runs/" + currentDay + args.tb + currentHour + "validation")
+    
     # if a model is specified: resume training
     if args.model:
         model_path = Path(args.model).expanduser()
@@ -394,7 +404,7 @@ def main():
             print("Apply Early Stopping")
             break
         
-    if args.tb == "yes":
+    if args.tb is not None:
         writerTrainLoss.close()
         writerValidationLoss.close()
 

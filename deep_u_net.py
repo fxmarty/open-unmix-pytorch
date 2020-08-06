@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import pytorch_model_summary
 from torchsummary import summary
 import math
+import normalization
 
 def valid_length(length):
     """
@@ -74,12 +75,16 @@ def padPerfectly(kernel_size,heigh,width,stride):
 class Deep_u_net(nn.Module):
     def __init__(
         self,
+        normalization_style="batch-specific",
         n_fft=4096,
         n_hop=1024,
         nb_channels=2,
         input_is_spectrogram=False,
         sample_rate=44100,
-        print=False
+        print=False,
+        input_mean=None,
+        input_scale=None,
+        max_bin=None
     ):
         """
         Input: (nb_samples, nb_channels, nb_timesteps)
@@ -101,6 +106,17 @@ class Deep_u_net(nn.Module):
         else:
             self.transform = nn.Sequential(self.stft, self.spec)
         
+        
+        self.nb_output_bins = n_fft // 2 + 1
+        if max_bin:
+            self.nb_bins = max_bin
+        else:
+            self.nb_bins = self.nb_output_bins
+        
+        self.normalize_input = normalization.Normalize(normalization_style,
+                                                       input_mean,
+                                                       input_scale,
+                                                       self.nb_bins)
         
         self.encoder = nn.ModuleList()
         self.encoder.append(conv_block(nb_channels,16))
@@ -133,9 +149,11 @@ class Deep_u_net(nn.Module):
         x_original = x.detach().clone()
         
         # scale between 0 and 1
-        xmax = torch.max(x)
-        xmin = torch.min(x)
-        x = (x - xmin)/(xmax-xmin)
+        #xmax = torch.max(x)
+        #xmin = torch.min(x)
+        #x = (x - xmin)/(xmax-xmin)
+        
+        x = self.normalize_input(x)
         
         saved = []
         saved_pad = []

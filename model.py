@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import pytorch_model_summary
 from torchsummary import summary
 
+import normalization
+
 class NoOp(nn.Module):
     def __init__(self):
         super().__init__()
@@ -93,6 +95,7 @@ class Spectrogram(nn.Module):
 class OpenUnmix(nn.Module):
     def __init__(
         self,
+        normalization_style="overall",
         n_fft=4096,
         n_hop=1024,
         input_is_spectrogram=False,
@@ -132,7 +135,12 @@ class OpenUnmix(nn.Module):
             self.transform = NoOp()
         else:
             self.transform = nn.Sequential(self.stft, self.spec)
-
+        
+        self.normalize_input = normalization.Normalize(normalization_style,
+                                                       input_mean,
+                                                       input_scale,
+                                                       self.nb_bins)
+        
         self.fc1 = Linear(
             self.nb_bins*nb_channels, hidden_size,
             bias=False
@@ -170,23 +178,6 @@ class OpenUnmix(nn.Module):
 
         self.bn3 = BatchNorm1d(self.nb_output_bins*nb_channels)
         
-        if input_mean is not None: # How could it be not None?
-            input_mean = torch.from_numpy(
-                -input_mean[:self.nb_bins]
-            ).float()
-        else:
-            input_mean = torch.zeros(self.nb_bins)
-        
-        if input_scale is not None:
-            input_scale = torch.from_numpy(
-                1.0/input_scale[:self.nb_bins]
-            ).float()
-        else:
-            input_scale = torch.ones(self.nb_bins)
-
-        self.input_mean = Parameter(input_mean)
-        self.input_scale = Parameter(input_scale)
-                
         self.output_scale = Parameter(
             torch.ones(self.nb_output_bins).float()
         )
@@ -209,9 +200,7 @@ class OpenUnmix(nn.Module):
         #print(x.shape)
         
         # shift and scale input to mean=0 std=1 (across all frames in one freq bin)
-        # Learnable paramaters (identical for all test files)
-        x += self.input_mean
-        x *= self.input_scale
+        x = self.normalize_input(x)
 
         # to (nb_frames*nb_samples, nb_channels*nb_bins)
         # and encode to (nb_frames*nb_samples, hidden_size)
