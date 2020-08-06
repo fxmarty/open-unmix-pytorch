@@ -139,7 +139,7 @@ class OpenUnmix(nn.Module):
         self.normalize_input = normalization.Normalize(normalization_style,
                                                        input_mean,
                                                        input_scale,
-                                                       self.nb_bins)
+                                                       self.nb_output_bins)
         
         self.fc1 = Linear(
             self.nb_bins*nb_channels, hidden_size,
@@ -194,13 +194,13 @@ class OpenUnmix(nn.Module):
 
         mix = x.detach().clone()
         #print(mix.shape)
+        
+        # shift and scale input to mean=0 std=1 (across all frames in one freq bin)
+        x = self.normalize_input(x)
 
         # crop, because we don't necessarily keep all bins due to the bandwidth
         x = x[..., :self.nb_bins]
         #print(x.shape)
-        
-        # shift and scale input to mean=0 std=1 (across all frames in one freq bin)
-        x = self.normalize_input(x)
 
         # to (nb_frames*nb_samples, nb_channels*nb_bins)
         # and encode to (nb_frames*nb_samples, hidden_size)

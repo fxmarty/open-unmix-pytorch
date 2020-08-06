@@ -99,6 +99,9 @@ def get_statistics(args, dataset):
 
 
 def main():
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
     parser = argparse.ArgumentParser(description='Open Unmix Trainer')
 
     # which target do we want to train?
@@ -189,12 +192,12 @@ def main():
     if args.normalization_style == None and args.modelname == "open-unmix":
         args.normalization_style = "overall"
         print("Normalization style set by default to \""
-                + args.normalization_style + "\"."
+                + args.normalization_style + "\".")
     
     if args.normalization_style == None and args.modelname == "deep-u-net":
         args.normalization_style = "batch-specific"
         print("Normalization style set by default to \""
-                + args.normalization_style + "\"."
+                + args.normalization_style + "\".")
     
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     print("Using GPU:", use_cuda)
@@ -264,13 +267,13 @@ def main():
         train_dataset.sample_rate, args.nfft, args.bandwidth
     ) # to stay under 16 000 Hz
 
+    if args.model or args.normalization_style == "batch-specific":
+        scaler_mean = None
+        scaler_std = None
+    else:
+        scaler_mean, scaler_std = get_statistics(args, train_dataset)
+
     if args.modelname == "open-unmix":
-        if args.model:
-            scaler_mean = None
-            scaler_std = None
-        else:
-            scaler_mean, scaler_std = get_statistics(args, train_dataset)
-        
         unmix = model.OpenUnmix(
             normalization_style=args.normalization_style,
             input_mean=scaler_mean,
@@ -288,7 +291,11 @@ def main():
             normalization_style=args.normalization_style,
             n_fft=args.nfft,
             n_hop=args.nhop,
-            nb_channels=args.nb_channels
+            nb_channels=args.nb_channels,
+            input_mean=scaler_mean,
+            input_scale=scaler_std,
+            max_bin=max_bin,
+            sample_rate=train_dataset.sample_rate
         ).to(device)
         
     optimizer = torch.optim.Adam(
