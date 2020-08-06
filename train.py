@@ -36,7 +36,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general="open
         optimizer.zero_grad()
         Y_hat = unmix(x)
         Y = unmix.transform(y)
-                    
+                            
         loss = torch.nn.functional.mse_loss(Y_hat, Y)
         loss.backward()
         optimizer.step()
@@ -190,11 +190,13 @@ def main():
     
     # Make normalization-style argument not mendatory
     if args.normalization_style == None and args.modelname == "open-unmix":
-        args.normalization_style = "overall"
+        parser.set_defaults(normalization_style="overall")
     
     if args.normalization_style == None and args.modelname == "deep-u-net":
-        args.normalization_style = "batch-specific"
+        parser.set_defaults(normalization_style="batch-specific")
     
+    # Update args according to the two conditions above
+    args, _ = parser.parse_known_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     print("Using GPU:", use_cuda)
     print("Using Torchaudio: ", utils._torchaudio_available())
@@ -209,7 +211,7 @@ def main():
     random.seed(args.seed)
 
     device = torch.device("cuda" if use_cuda else "cpu")
-
+    
     # Load and process training and validation sets
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
     
@@ -226,7 +228,7 @@ def main():
     print("len(train_dataset):",len(train_dataset))
     print("len(train_dataset[0]):",len(train_dataset[0]))
     print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
-        
+    
     # create output dir if not exist
     target_path = Path(args.output)
     target_path.mkdir(parents=True, exist_ok=True)
@@ -240,7 +242,6 @@ def main():
         valid_dataset, batch_size=1,
         **dataloader_kwargs
     )
-        
     """
     examples = enumerate(train_sampler)
     example = next(examples)
@@ -262,13 +263,13 @@ def main():
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth
     ) # to stay under 16 000 Hz
-
+    
     if args.model or args.normalization_style == "batch-specific":
         scaler_mean = None
         scaler_std = None
     else:
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
-
+    
     if args.modelname == "open-unmix":
         unmix = model.OpenUnmix(
             normalization_style=args.normalization_style,

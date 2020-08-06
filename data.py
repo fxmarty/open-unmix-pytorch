@@ -208,6 +208,7 @@ def load_datasets(parser, args):
         )
 
         args = parser.parse_args()
+        
         dataset_kwargs = {
             'root': args.root,
             'is_wav': args.is_wav,
