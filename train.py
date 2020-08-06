@@ -191,13 +191,9 @@ def main():
     # Make normalization-style argument not mendatory
     if args.normalization_style == None and args.modelname == "open-unmix":
         args.normalization_style = "overall"
-        print("Normalization style set by default to \""
-                + args.normalization_style + "\".")
     
     if args.normalization_style == None and args.modelname == "deep-u-net":
         args.normalization_style = "batch-specific"
-        print("Normalization style set by default to \""
-                + args.normalization_style + "\".")
     
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     print("Using GPU:", use_cuda)

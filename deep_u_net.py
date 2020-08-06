@@ -116,7 +116,7 @@ class Deep_u_net(nn.Module):
         self.normalize_input = normalization.Normalize(normalization_style,
                                                        input_mean,
                                                        input_scale,
-                                                       self.nb_bins)
+                                                       self.nb_output_bins)
         
         self.encoder = nn.ModuleList()
         self.encoder.append(conv_block(nb_channels,16))
@@ -147,12 +147,7 @@ class Deep_u_net(nn.Module):
         x = torch.reshape(x,(nb_samples,nb_channels,-1,nb_bins))
         
         x_original = x.detach().clone()
-        
-        # scale between 0 and 1
-        #xmax = torch.max(x)
-        #xmin = torch.min(x)
-        #x = (x - xmin)/(xmax-xmin)
-        
+                
         x = self.normalize_input(x)
         
         saved = []

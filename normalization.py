@@ -12,6 +12,7 @@ class Normalize(nn.Module):
         super(Normalize,self).__init__()
         
         self.normalization_style = normalization_style
+        print("Normalization set to \"" + self.normalization_style + "\".")
         
         if input_mean is not None:
             input_mean = torch.from_numpy(
