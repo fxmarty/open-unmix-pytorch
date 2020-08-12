@@ -6,6 +6,7 @@ import random
 import musdb
 import torch
 import tqdm
+import librosa
 
 class Compose(object):
     """Composes several augmentation transforms.
@@ -235,7 +236,8 @@ def load_datasets(parser, args):
 
         valid_dataset = MUSDBDataset(
             modelname = args.modelname, split='valid',
-            samples_per_track=1, seq_duration=None,**dataset_kwargs
+            samples_per_track=1, seq_duration=None,
+            **dataset_kwargs
         )
 
     return train_dataset, valid_dataset, args
@@ -774,6 +776,12 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     chunk_start = random.uniform(0,
                                             track.duration - self.seq_duration)
                     self.dataindex[i][j] = chunk_start
+        
+        
+        print("ICI:",self.mus.tracks[0].sources['vocals'].audio.shape)
+
+        
+        print(len(self.mus.tracks))        
                     
     def __getitem__(self, index):
         audio_sources = []

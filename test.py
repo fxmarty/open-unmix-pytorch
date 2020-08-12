@@ -17,7 +17,7 @@ import tqdm
 from contextlib import redirect_stderr
 import io
 
-def load_model(target, model_name='umxhq', device='cpu',model_name_general="open-unmix"):
+def load_model(target, model_name='umxhq', device='cpu'):
     """
     target model path can be either <target>.pth, or <target>-sha256.pth
     (as used on torchub)
@@ -46,7 +46,7 @@ def load_model(target, model_name='umxhq', device='cpu',model_name_general="open
         ) # returns the number of frequency bins so that their frequency is lower
         # than the bandwidth indicated in the .json files
 
-        if model_name_general == "open-unmix":
+        if results['args']['modelname'] == "open-unmix":
             unmix = model.OpenUnmix(
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
@@ -62,7 +62,7 @@ def load_model(target, model_name='umxhq', device='cpu',model_name_general="open
             unmix.eval()
             unmix.to(device)
         
-        if model_name_general == "deep-u-net":
+        if results['args']['modelname'] == "deep-u-net":
             unmix = deep_u_net.Deep_u_net(
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
@@ -95,8 +95,7 @@ def separate(
     targets,
     model_name='umxhq',
     niter=1, softmask=False, alpha=1.0,
-    residual_model=False, device='cpu',
-    model_name_general="open-unmix"
+    residual_model=False, device='cpu'
 ):
     """
     Performing the separation on audio input
@@ -152,8 +151,7 @@ def separate(
         unmix_target = load_model(
             target=target,
             model_name=model_name,
-            device=device,
-            model_name_general=model_name_general
+            device=device
         )
         Vj = unmix_target(audio_torch).cpu().detach().numpy()
         #print(Vj.shape)
@@ -200,7 +198,8 @@ def separate(
             )
             estimates[name] = audio_hat.T
     """
-    if model_name_general == "deep-u-net" or model_name_general == "open-unmix": # without wiener filtering
+    #if model_name_general == "deep-u-net" or model_name_general == "open-unmix": # without wiener filtering
+    if True == True:
         phase_audio = np.angle(X)[...,np.newaxis]
         Y = phase_audio * V
         
@@ -264,8 +263,7 @@ def test_main(
     input_files=None, samplerate=44100, niter=1, alpha=1.0,
     softmask=False, residual_model=False, model='umxhq',
     targets=('vocals', 'drums', 'bass', 'other'),
-    outdir=None, start=0.0, duration=-1.0, no_cuda=False,model_name_general="open-unmix"
-):
+    outdir=None, start=0.0, duration=-1.0, no_cuda=False):
 
     use_cuda = not no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -314,8 +312,7 @@ def test_main(
             alpha=alpha,
             softmask=softmask,
             residual_model=residual_model,
-            device=device,
-            model_name_general=model_name_general
+            device=device
         ) # is a dictionary
         
         
@@ -407,13 +404,6 @@ if __name__ == '__main__':
         help='disables CUDA inference'
     )
     
-    parser.add_argument(
-        '--modelname',
-        default="open-unmix",
-        type=str,
-        help='model name, used to modify the testing procedure accordingly'
-    )
-
     args, _ = parser.parse_known_args()
     args = inference_args(parser, args)
     
@@ -422,7 +412,6 @@ if __name__ == '__main__':
         alpha=args.alpha, softmask=args.softmask, niter=args.niter,
         residual_model=args.residual_model, model=args.model,
         targets=args.targets, outdir=args.outdir, start=args.start,
-        duration=args.duration, no_cuda=args.no_cuda,model_name_general=args.modelname
-    )
+        duration=args.duration, no_cuda=args.no_cuda)
 
 #summary(unmix, (1,300000))
