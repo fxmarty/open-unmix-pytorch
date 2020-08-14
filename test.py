@@ -48,33 +48,27 @@ def load_model(target, model_name='umxhq', device='cpu'):
 
         if results['args']['modelname'] == "open-unmix":
             unmix = model.OpenUnmix(
+                normalization_style=results['args']['normalization_style'],
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
                 nb_channels=results['args']['nb_channels'],
                 hidden_size=results['args']['hidden_size'],
                 max_bin=max_bin
             )
-            
-            #print(unmix.input_mean)
-            unmix.load_state_dict(state) # ???????? mean and scale loaded here, fixed values 
-            #print(unmix.input_mean)
-            unmix.stft.center = True
-            unmix.eval()
-            unmix.to(device)
-        
+                    
         if results['args']['modelname'] == "deep-u-net":
             unmix = deep_u_net.Deep_u_net(
+                normalization_style=results['args']['normalization_style'],
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
                 nb_channels=results['args']['nb_channels']
             )
             
-            #print(unmix.input_mean)
-            unmix.load_state_dict(state) # ???????? mean and scale loaded here, fixed values 
-            #print(unmix.input_mean)
-            unmix.stft.center = True
-            unmix.eval()
-            unmix.to(device)
+            
+        unmix.load_state_dict(state) # Load saved model
+        unmix.stft.center = True
+        unmix.eval()
+        unmix.to(device)
             
         return unmix
 
@@ -140,8 +134,6 @@ def separate(
 
     """
     # convert numpy audio to torch
-    #TOSEE: Why isn't it (nb_timesteps, nb_channels) but (1,nb_timesteps, nb_channels)?
-    # Why transpose?
     audio_torch = torch.tensor(audio.T[None, ...]).float().to(device)
     #print("Audio size ",audio_torch.shape) #(1,2,nb_time_points)
     source_names = []

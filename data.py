@@ -7,6 +7,7 @@ import musdb
 import torch
 import tqdm
 import librosa
+import numpy as np
 
 class Compose(object):
     """Composes several augmentation transforms.
@@ -776,12 +777,29 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     chunk_start = random.uniform(0,
                                             track.duration - self.seq_duration)
                     self.dataindex[i][j] = chunk_start
-        
-        
-        print("ICI:",self.mus.tracks[0].sources['vocals'].audio.shape)
-
-        
-        print(len(self.mus.tracks))        
+        """
+        if True == True:
+            print("Before resampling:",self.mus.tracks[0].sources['vocals'].audio.shape)
+            print("Rate before resampling:",self.mus.tracks[0].rate)
+            print("Duration before resampling:",self.mus.tracks[0].duration)
+            if split == 'valid':
+                downsampledData = np.load('Code/validationsetDownsampled.npy',allow_pickle=True)
+            if split == 'train':
+                downsampledData = np.load('Code/trainsetDownsampled.npy',allow_pickle=True)
+                
+            sources_names = ['vocals','drums','bass','other']
+            for i,track in enumerate(tqdm.tqdm(self.mus.tracks)):
+                for j,source_name in enumerate(sources_names):
+                    #track.sources[source_name].audio = downsampledData[i][j]
+                    track.sources[source_name].audio = np.zeros((1355873,2))
+                track.rate = 8192
+            
+            del downsampledData
+            print("After resampling:",self.mus.tracks[0].sources['vocals'].audio.shape)
+            print("After resampling:",self.mus.tracks[0].sources['drums'].audio.shape)
+            print("Rate after resampling:",self.mus.tracks[0].rate)
+            print("Duration after resampling:",self.mus.tracks[0].duration)
+        """
                     
     def __getitem__(self, index):
         audio_sources = []
@@ -791,32 +809,38 @@ class MUSDBDataset(torch.utils.data.Dataset):
         track = self.mus.tracks[index // self.samples_per_track]
 
         # at training time we assemble a custom mix
-        if self.split == 'train' and self.seq_duration and self.data_augmentation == "yes":
+        if self.split == 'train' and self.seq_duration:
             for k, source in enumerate(self.mus.setup['sources']):
                 # memorize index of target source
                 if source == self.target:
                     target_ind = k
-
-                # select a random track.
-                if self.random_track_mix:
+                # select a random track if data augmentation
+                if self.random_track_mix and self.data_augmentation == "yes":
                     track = random.choice(self.mus.tracks)
-
                 # set the excerpt duration
+                
                 track.chunk_duration = self.seq_duration
-                # set random start position
-                track.chunk_start = random.uniform(
-                    0, track.duration - self.seq_duration
-                )
+                                
+                # set random start position if data augmentation
+                if self.data_augmentation == "yes":
+                    track.chunk_start = random.uniform(
+                        0, track.duration - self.seq_duration)
+                else:
+                    track.chunk_start = self.dataindex[index // self.samples_per_track][index % self.samples_per_track].item()
+                
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
                     track.sources[source].audio.T,
                     dtype=self.dtype
                 )
                 
+                """
                 if self.modelname == "deep-u-net":
                     audio = audio[...,:262144]
+                """
                 
-                audio = self.source_augmentations(audio)
+                if self.data_augmentation == "yes":
+                    audio = self.source_augmentations(audio)
                 audio_sources.append(audio)
 
             # create stem tensor of shape (source, channel, samples)
@@ -831,31 +855,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 vocind = list(self.mus.setup['sources'].keys()).index('vocals')
                 # apply time domain subtraction
                 y = x - stems[vocind]
-        
-        # Case without source augmentation
-        elif self.split == 'train' and self.seq_duration and self.data_augmentation == "no":     
-
-            for k, source in enumerate(self.mus.setup['sources']):
-                # memorize index of target source
-                if source == self.target:
-                    target_ind = k
-
-                # set the excerpt duration
-                track.chunk_duration = self.seq_duration
-                # set random start position
-                #print(k)
-                track.chunk_start = self.dataindex[index // self.samples_per_track][index % self.samples_per_track].item()
-
-                audio = torch.tensor(
-                    track.sources[source].audio.T,
-                    dtype=self.dtype
-                )
-                
-                if self.modelname == "deep-u-net":
-                    audio = audio[...,:262144]
-                
-                audio_sources.append(audio)
-
+    
             # create stem tensor of shape (source, channel, samples)
             stems = torch.stack(audio_sources, dim=0)
             # # apply linear mix over source index=0
