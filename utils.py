@@ -2,6 +2,26 @@ import shutil
 import torch
 import os
 import numpy as np
+import math
+
+def memory_check(comment):
+    print(comment,torch.cuda.memory_allocated(0)*1e-9, "GB out of",torch.cuda.get_device_properties(0).total_memory*1e-9, "GB used.")
+
+# Returns true if no time steps left over in a Conv1d.
+def checkValidConvolution(input_size,kernel_size,stride=1,padding=0,dilation=1,note=""):
+    print(note,((input_size + 2*padding - dilation * (kernel_size - 1) - 1)/stride
+            + 1).is_integer())
+
+def valid_length(input_size,kernel_size,stride=1,padding=0,dilation=1):
+    """
+    Return the nearest valid length to use with the model so that
+    there is no time steps left over in a a 1dConv, e.g. for all
+    layers, size of the (input - kernel_size) % stride = 0.
+    """
+    length = math.ceil((input_size + 2*padding - dilation * (kernel_size - 1) - 1)/stride) + 1
+    length = (length - 1) * stride - 2*padding + dilation * (kernel_size - 1) + 1
+
+    return int(length)
 
 
 def _sndfile_available():

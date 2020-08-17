@@ -70,7 +70,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
         unmix.eval()
         unmix.to(device)
             
-        return unmix
+        return unmix,results['args']['modelname']
 
 
 def istft(X, rate=44100, n_fft=4096, n_hopsize=1024):
@@ -140,7 +140,7 @@ def separate(
     V = [] # ????
 
     for j, target in enumerate(tqdm.tqdm(targets)): # tqdm for progress bar
-        unmix_target = load_model(
+        unmix_target,modelname = load_model(
             target=target,
             model_name=model_name,
             device=device
@@ -170,8 +170,8 @@ def separate(
     
     estimates = {}
     
-    """
-    if model_name_general == "open-unmix":
+    
+    if modelname == "open-unmix":
         if residual_model or len(targets) == 1:
             V = norbert.residual_model(V, X, alpha if softmask else 1)
             source_names += (['residual'] if len(targets) > 1
@@ -189,9 +189,8 @@ def separate(
                 n_hopsize=unmix_target.stft.n_hop
             )
             estimates[name] = audio_hat.T
-    """
-    #if model_name_general == "deep-u-net" or model_name_general == "open-unmix": # without wiener filtering
-    if True == True:
+    
+    if modelname == "deep-u-net": #or model_name_general == "open-unmix": # without wiener filtering
         phase_audio = np.angle(X)[...,np.newaxis]
         Y = phase_audio * V
         

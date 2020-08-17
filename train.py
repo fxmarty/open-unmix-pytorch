@@ -2,6 +2,8 @@ import argparse
 
 import model
 import deep_u_net
+import convtasnet
+
 import data
 import utils
 
@@ -20,11 +22,13 @@ from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 import sys
 
+from loss_SISNR import sisnr
+
 
 tqdm.monitor_interval = 0
 batch_seen = 0
 
-def train(args, unmix, device, train_sampler, optimizer,model_name_general="open-unmix",tb="no"):
+def train(args, unmix, device, train_sampler, optimizer,model_name_general,tb="no"):
     losses = utils.AverageMeter()
     unmix.train()
     pbar = tqdm.tqdm(train_sampler, disable=args.quiet)
@@ -34,10 +38,21 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general="open
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        Y_hat = unmix(x)
-        Y = unmix.transform(y)
-                            
-        loss = torch.nn.functional.mse_loss(Y_hat, Y)
+        print("before batch",torch.cuda.memory_allocated(0))
+        if model_name_general in ('open-unmix', 'deep-u-net'):
+            Y_hat = unmix(x)
+            Y = unmix.transform(y)
+            loss = torch.nn.functional.mse_loss(Y_hat, Y)
+            print(type(loss))
+            print(loss)
+        
+        if model_name_general == 'convtasnet':
+            y_hat = unmix(x)
+            print(y_hat.shape)
+            print(y.shape)
+            print("on y va la loss!!!")
+            loss = sisnr(y_hat,y)
+            
         loss.backward()
         optimizer.step()
         
@@ -67,7 +82,7 @@ def valid(args, unmix, device, valid_sampler,tb="no"):
         
         return losses.avg
 
-
+# Called only when normalization_style = overall
 def get_statistics(args, dataset):
     scaler = sklearn.preprocessing.StandardScaler()
 
@@ -163,7 +178,7 @@ def main():
     
     parser.add_argument(
         '--modelname',
-        choices=['open-unmix', 'deep-u-net'],
+        choices=['open-unmix', 'deep-u-net','convtasnet'],
         type=str,
         help='model name, used to modify the training procedure accordingly'
     )
@@ -178,22 +193,29 @@ def main():
     
     parser.add_argument(
         '--normalization-style',
-        choices=['overall', 'batch-specific'],
+        choices=['overall', 'batch-specific','none'],
         type=str,
         help='Use different normalization styles than the default for a model.'
     )
     
     parser.add_argument('--tb', default=None,
                         help='use tensorboard, and if so, set name')
+    
+    parser.add_argument('--verbose',
+                        action='store_true',
+                        help='Print details during training process')
 
     args, _ = parser.parse_known_args()
     
     # Make normalization-style argument not mendatory
-    if args.normalization_style == None and args.modelname == "open-unmix":
-        parser.set_defaults(normalization_style="overall")
+    if args.normalization_style == None and args.modelname == 'open-unmix':
+        parser.set_defaults(normalization_style='overall')
     
-    if args.normalization_style == None and args.modelname == "deep-u-net":
-        parser.set_defaults(normalization_style="batch-specific")
+    if args.normalization_style == None and args.modelname == 'deep-u-net':
+        parser.set_defaults(normalization_style='batch-specific')
+    
+    if args.normalization_style == None and args.modelname == 'convtasnet':
+        parser.set_defaults(normalization_style='none')
     
     # Update args according to the two conditions above
     args, _ = parser.parse_known_args()
@@ -215,10 +237,10 @@ def main():
     # Load and process training and validation sets
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
     
-    if args.modelname == "deep-u-net":
+    if args.modelname == 'deep-u-net':
         print("WARNING: Be warned that the sequence length has been overridden to 262144 times points, i.e. ~5,94 s.")
     
-    if args.data_augmentation == "no":
+    if args.data_augmentation == 'no':
         print("WARNING: Data augmentation has been disabled.")
     
     print("Taille validation set:",len(valid_dataset))
@@ -264,13 +286,13 @@ def main():
         train_dataset.sample_rate, args.nfft, args.bandwidth
     ) # to stay under 16 000 Hz
     
-    if args.model or args.normalization_style == "batch-specific":
+    if args.model or args.normalization_style in ('batch-specific','none'):
         scaler_mean = None
         scaler_std = None
     else:
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
     
-    if args.modelname == "open-unmix":
+    if args.modelname == 'open-unmix':
         unmix = model.OpenUnmix(
             normalization_style=args.normalization_style,
             input_mean=scaler_mean,
@@ -280,12 +302,14 @@ def main():
             n_fft=args.nfft,
             n_hop=args.nhop,
             max_bin=max_bin,
-            sample_rate=train_dataset.sample_rate
+            sample_rate=train_dataset.sample_rate,
+            print = args.verbose
         ).to(device)
         
-    elif args.modelname == "deep-u-net":
+    elif args.modelname == 'deep-u-net':
         unmix = deep_u_net.Deep_u_net(
             normalization_style=args.normalization_style,
+            print = args.verbose,
             n_fft=args.nfft,
             n_hop=args.nhop,
             nb_channels=args.nb_channels,
@@ -293,6 +317,12 @@ def main():
             input_scale=scaler_std,
             max_bin=max_bin,
             sample_rate=train_dataset.sample_rate
+        ).to(device)
+    
+    elif args.modelname == 'convtasnet':
+        unmix = convtasnet.ConvTasNet(
+            normalization_style=args.normalization_style,
+            print=args.verbose
         ).to(device)
         
     optimizer = torch.optim.Adam(

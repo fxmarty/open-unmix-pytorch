@@ -777,29 +777,6 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     chunk_start = random.uniform(0,
                                             track.duration - self.seq_duration)
                     self.dataindex[i][j] = chunk_start
-        """
-        if True == True:
-            print("Before resampling:",self.mus.tracks[0].sources['vocals'].audio.shape)
-            print("Rate before resampling:",self.mus.tracks[0].rate)
-            print("Duration before resampling:",self.mus.tracks[0].duration)
-            if split == 'valid':
-                downsampledData = np.load('Code/validationsetDownsampled.npy',allow_pickle=True)
-            if split == 'train':
-                downsampledData = np.load('Code/trainsetDownsampled.npy',allow_pickle=True)
-                
-            sources_names = ['vocals','drums','bass','other']
-            for i,track in enumerate(tqdm.tqdm(self.mus.tracks)):
-                for j,source_name in enumerate(sources_names):
-                    #track.sources[source_name].audio = downsampledData[i][j]
-                    track.sources[source_name].audio = np.zeros((1355873,2))
-                track.rate = 8192
-            
-            del downsampledData
-            print("After resampling:",self.mus.tracks[0].sources['vocals'].audio.shape)
-            print("After resampling:",self.mus.tracks[0].sources['drums'].audio.shape)
-            print("Rate after resampling:",self.mus.tracks[0].rate)
-            print("Duration after resampling:",self.mus.tracks[0].duration)
-        """
                     
     def __getitem__(self, index):
         audio_sources = []
