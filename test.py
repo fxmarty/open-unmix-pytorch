@@ -10,6 +10,7 @@ import resampy
 
 import model
 import deep_u_net
+import convtasnet
 
 import utils
 import warnings
@@ -37,7 +38,6 @@ def load_model(target, model_name='umxhq', device='cpu'):
             target_model_path,
             map_location=device
         )
-        #print(state)
         
         max_bin = utils.bandwidth_to_max_bin(
             state['sample_rate'],
@@ -46,7 +46,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
         ) # returns the number of frequency bins so that their frequency is lower
         # than the bandwidth indicated in the .json files
 
-        if results['args']['modelname'] == "open-unmix":
+        if results['args']['modelname'] == 'open-unmix':
             unmix = model.OpenUnmix(
                 normalization_style=results['args']['normalization_style'],
                 n_fft=results['args']['nfft'],
@@ -55,18 +55,25 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 hidden_size=results['args']['hidden_size'],
                 max_bin=max_bin
             )
+            unmix.stft.center = True
                     
-        if results['args']['modelname'] == "deep-u-net":
+        if results['args']['modelname'] == 'deep-u-net':
             unmix = deep_u_net.Deep_u_net(
                 normalization_style=results['args']['normalization_style'],
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
                 nb_channels=results['args']['nb_channels']
             )
+            unmix.stft.center = True
+        
+        if results['args']['modelname'] == 'convtasnet':
+            unmix = convtasnet.ConvTasNet(
+                normalization_style=results['args']['normalization_style'],
+                nb_channels=results['args']['nb_channels']
+            )
             
             
         unmix.load_state_dict(state) # Load saved model
-        unmix.stft.center = True
         unmix.eval()
         unmix.to(device)
             
@@ -151,27 +158,31 @@ def separate(
             # only exponentiate the model if we use softmask
             Vj = Vj**alpha
         # output is nb_frames, nb_samples, nb_channels, nb_bins
-        V.append(Vj[:, 0, ...])  # remove sample dim
+
+        
+        if modelname in ('open-unmix','deep-u-net'):
+            V.append(Vj[:, 0, ...])  # remove sample dim
+        if modelname in ('convtasnet'):
+            V.append(Vj[0,:].T)
         source_names += [target]
-
-    V = np.transpose(np.array(V), (1, 3, 2, 0))
-    #print("V:",V.shape) #mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
-    #print(V[40][40])
+        
+    if modelname in ('open-unmix','deep-u-net'):
+        V = np.transpose(np.array(V), (1, 3, 2, 0))
+        #print("V:",V.shape) #mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
+        #print(V[40][40])
+        
     
-
-    X = unmix_target.stft(audio_torch).detach().cpu().numpy()
-    #print(X.shape)
-    # convert to complex numpy type
-    X = X[..., 0] + X[..., 1]*1j
-    #print(X.shape)
-    X = X[0].transpose(2, 1, 0)
-    #print("Final shape X:",X.shape) # shape (nb_frames, nb_bins, 2). Complex numbers
-    #print(X[12][12])
+        X = unmix_target.stft(audio_torch).detach().cpu().numpy()
+        #print(X.shape)
+        # convert to complex numpy type
+        X = X[..., 0] + X[..., 1]*1j
+        #print(X.shape)
+        X = X[0].transpose(2, 1, 0)
+        #print("Final shape X:",X.shape) # shape (nb_frames, nb_bins, 2). Complex numbers
     
     estimates = {}
     
-    
-    if modelname == "open-unmix":
+    if modelname == 'open-unmix':
         if residual_model or len(targets) == 1:
             V = norbert.residual_model(V, X, alpha if softmask else 1)
             source_names += (['residual'] if len(targets) > 1
@@ -190,7 +201,7 @@ def separate(
             )
             estimates[name] = audio_hat.T
     
-    if modelname == "deep-u-net": #or model_name_general == "open-unmix": # without wiener filtering
+    if modelname == 'deep-u-net': #or model_name_general == "open-unmix": # without wiener filtering
         phase_audio = np.angle(X)[...,np.newaxis]
         Y = phase_audio * V
         
@@ -202,6 +213,11 @@ def separate(
             )
             estimates[name] = audio_hat.T
     
+    if modelname == 'convtasnet':
+        for j, name in enumerate(source_names):
+            estimates[name] = V[j]
+    
+    print("taille:",estimates['vocals'].shape)
     return estimates
 
 
@@ -329,7 +345,7 @@ def test_main(
                 output_path = Path(outdir)
 
         output_path.mkdir(exist_ok=True, parents=True)
-
+                
         for target, estimate in estimates.items():
             sf.write(
                 str(output_path / Path(target).with_suffix('.wav')),

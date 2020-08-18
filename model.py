@@ -86,7 +86,7 @@ class Spectrogram(nn.Module):
         # -1 for the last column, we don't take the spectrogram at a power of 2
         stft_f = stft_f.pow(2).sum(-1).pow(self.power / 2.0)
 
-        # downmix in the mag domain
+        # If nb_channels = 1, downmix in the mag domain
         if self.mono:
             stft_f = torch.mean(stft_f, 1, keepdim=True)
         # permute output for LSTM convenience
@@ -130,6 +130,8 @@ class OpenUnmix(nn.Module):
 
         self.stft = STFT(n_fft=n_fft, n_hop=n_hop)
         self.spec = Spectrogram(power=power, mono=(nb_channels == 1))
+        
+        # model parameter, saved in state_dict but not trainable
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
 
         if input_is_spectrogram:

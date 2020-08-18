@@ -765,9 +765,9 @@ class MUSDBDataset(torch.utils.data.Dataset):
             download=download,
             *args, **kwargs
         )
-        self.sample_rate = 44100  # musdb is fixed sample rate
+        self.sample_rate = 8192 #self.mus.tracks[0].rate  # musdb is fixed sample rate
         self.dtype = dtype
-
+        
         if self.data_augmentation == "no":
             self.dataindex = torch.zeros(len(self.mus),self.samples_per_track)
             
@@ -810,11 +810,15 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     track.sources[source].audio.T,
                     dtype=self.dtype
                 )
+                #print(audio.shape)
                 
-                """
                 if self.modelname == "deep-u-net":
-                    audio = audio[...,:262144]
-                """
+                    #audio = audio[...,:262144]
+                    audio = audio[...,:98560] # for testing purpose, 128 frames
+                    #print(audio.shape)
+                
+                #print(track.sources[source])
+                #print(audio.shape)
                 
                 if self.data_augmentation == "yes":
                     audio = self.source_augmentations(audio)

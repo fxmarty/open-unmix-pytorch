@@ -69,15 +69,15 @@ def padPerfectly(kernel_size,heigh,width,stride):
                     divisionValue_idealPadding_w*stride/(width - kernel_size))
     
     # Reverse heigh and width order according to F.pad behavior
-    return (padding_w//2,(padding_w - padding_w//2),
-            padding_h//2,(padding_h - padding_h//2))
+    return (padding_w//2+1,(padding_w - padding_w//2)+1,
+            padding_h//2+1,(padding_h - padding_h//2)+1)
     
 class Deep_u_net(nn.Module):
     def __init__(
         self,
         normalization_style="batch-specific",
-        n_fft=4096,
-        n_hop=1024,
+        n_fft=1024,
+        n_hop=768,
         nb_channels=2,
         input_is_spectrogram=False,
         sample_rate=44100,
@@ -135,14 +135,17 @@ class Deep_u_net(nn.Module):
             in_chans = 16*2**i
             self.decoder.append(deconv_block(in_chans,in_chans//4,dropout=False))
         
-        self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation="sigmoid",batchnorm=False)) # stereo output
+        self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation='sigmoid',batchnorm=False)) # stereo output
     
 
     def forward(self, mix):
+        if self.print == True:print("original size:",mix.shape)
+        
         # transform to spectrogram on the fly
         x = self.transform(mix)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
         
+        if self.print == True:print("After transform:",x.shape)
         # reshape to the conventional shape for cnn in pytorch
         x = torch.reshape(x,(nb_samples,nb_channels,-1,nb_bins))
         
@@ -200,12 +203,14 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     deep_u_net = Deep_u_net(
         nb_channels=2,
-        sample_rate=44100,
+        sample_rate=8192,
+        n_fft=1024,
+        n_hop=768,
         print=True
         ).to(device)
         
     #print(deep_u_net)    
-    mix = (torch.rand(1, 2, 262144)+2)**2
+    mix = (torch.rand(16, 2, 2*98560)+2)**2
     mix = mix.to(device)
     deep_u_net.forward(mix)
     

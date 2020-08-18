@@ -23,6 +23,7 @@ from datetime import datetime
 import sys
 
 from loss_SISNR import sisnr
+from utils import memory_check
 
 
 tqdm.monitor_interval = 0
@@ -38,20 +39,17 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,tb="n
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        print("before batch",torch.cuda.memory_allocated(0))
+                
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
             Y = unmix.transform(y)
             loss = torch.nn.functional.mse_loss(Y_hat, Y)
-            print(type(loss))
-            print(loss)
+            losses.update(loss.item(), Y.size(1))
         
         if model_name_general == 'convtasnet':
             y_hat = unmix(x)
-            print(y_hat.shape)
-            print(y.shape)
-            print("on y va la loss!!!")
             loss = sisnr(y_hat,y)
+            losses.update(loss.item(), x.size(0))
             
         loss.backward()
         optimizer.step()
@@ -60,22 +58,30 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,tb="n
             batch_seen = batch_seen + 1 
             writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
         
-        losses.update(loss.item(), Y.size(1))
+        #memory_check("After batch"+str(batch_seen)+":")
+                
     return losses.avg
 
 
-def valid(args, unmix, device, valid_sampler,tb="no"):
+def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
     losses = utils.AverageMeter()
     unmix.eval()
     global batch_seen
     with torch.no_grad():
         for x, y in valid_sampler:
             x, y = x.to(device), y.to(device)
-            Y_hat = unmix(x)
-            Y = unmix.transform(y)
-            loss = torch.nn.functional.mse_loss(Y_hat, Y)
-            losses.update(loss.item(), Y.size(1))
-        
+            
+            if model_name_general in ('open-unmix', 'deep-u-net'):
+                Y_hat = unmix(x)
+                Y = unmix.transform(y)
+                loss = torch.nn.functional.mse_loss(Y_hat, Y)
+                losses.update(loss.item(), Y.size(1))
+            
+            if model_name_general == 'convtasnet':
+                y_hat = unmix(x)
+                loss = sisnr(y_hat,y)
+                losses.update(loss.item(), x.size(0))
+            
         if tb is not None:
             print("Valid:",losses.avg)
             writerValidationLoss.add_scalar('Loss', losses.avg,batch_seen)
@@ -238,13 +244,14 @@ def main():
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
     
     if args.modelname == 'deep-u-net':
-        print("WARNING: Be warned that the sequence length has been overridden to 262144 times points, i.e. ~5,94 s.")
+        print("WARNING: Be warned that the sequence length may have been overridden.")
     
     if args.data_augmentation == 'no':
         print("WARNING: Data augmentation has been disabled.")
     
-    print("Taille validation set:",len(valid_dataset))
-    print("Taille train set:",len(train_dataset))
+    print("Sampling rate of dataset:",train_dataset.sample_rate,"Hz")
+    print("Size validation set:",len(valid_dataset))
+    print("Size train set:",len(train_dataset))
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
         
     print("len(train_dataset):",len(train_dataset))
@@ -322,7 +329,8 @@ def main():
     elif args.modelname == 'convtasnet':
         unmix = convtasnet.ConvTasNet(
             normalization_style=args.normalization_style,
-            print=args.verbose
+            print=args.verbose,
+            sample_rate=train_dataset.sample_rate
         ).to(device)
         
     optimizer = torch.optim.Adam(
@@ -387,7 +395,9 @@ def main():
         end = time.time()
         
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,tb=args.tb)
-        valid_loss = valid(args, unmix, device, valid_sampler,tb=args.tb)
+        
+        memory_check("After batches from epoch"+str(epoch)+":")
+        valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
         
         scheduler.step(valid_loss)
         train_losses.append(train_loss)
