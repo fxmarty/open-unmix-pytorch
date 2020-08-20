@@ -35,8 +35,18 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,tb="n
     unmix.train()
     pbar = tqdm.tqdm(train_sampler, disable=args.quiet)
     global batch_seen
+    #i = 0
     # Loop by number of tracks * number of samples per track / batch size
     for x, y in pbar:
+        torch.autograd.set_detect_anomaly(True)
+
+        """
+        if i == 0:
+            print("x:",x)
+            print("y:",y)
+            print("----")
+        i = i + 1
+        """
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
@@ -45,11 +55,19 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,tb="n
             Y_hat = unmix(x)
             Y = unmix.transform(y)
             
-            # deep-u-net requires normalization for the reference too^
+            """
+            # deep-u-net requires normalization for the reference too
             if model_name_general == 'deep-u-net':
-                self.normalize_input = normalization.Normalize('batch-specific',print=False)
-                
-            loss = torch.nn.functional.mse_loss(Y_hat, Y)
+                Ymax = torch.max(Y)
+                Ymin = torch.min(Y)
+                Y = (Y - Ymin)/(Ymax-Ymin)
+            """
+            if model_name_general == 'open-unmix':
+                loss = torch.nn.functional.mse_loss(Y_hat, Y)
+            
+            if model_name_general == 'deep-u-net':
+                loss = torch.nn.functional.l1_loss(Y_hat, Y)
+            
             losses.update(loss.item(), Y.size(1))
         
         if model_name_general == 'convtasnet':
@@ -80,7 +98,20 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
             if model_name_general in ('open-unmix', 'deep-u-net'):
                 Y_hat = unmix(x)
                 Y = unmix.transform(y)
-                loss = torch.nn.functional.mse_loss(Y_hat, Y)
+                
+                """
+                # deep-u-net requires normalization for the reference too
+                if model_name_general == 'deep-u-net':
+                    Ymax = torch.max(Y)
+                    Ymin = torch.min(Y)
+                    Y = (Y - Ymin)/(Ymax-Ymin)
+                """
+                if model_name_general == 'open-unmix':
+                    loss = torch.nn.functional.mse_loss(Y_hat, Y)
+                
+                if model_name_general == 'deep-u-net':
+                    loss = torch.nn.functional.l1_loss(Y_hat, Y)
+                
                 losses.update(loss.item(), Y.size(1))
             
             if model_name_general == 'convtasnet':
@@ -149,22 +180,22 @@ def main():
 
     # Trainig Parameters
     parser.add_argument('--epochs', type=int, default=1000)
-    parser.add_argument('--batch-size', type=int, default=16)
+    parser.add_argument('--batch-size','--batch_size', type=int, default=16)
     parser.add_argument('--lr', type=float, default=0.001,
                         help='learning rate, defaults to 1e-3')
     parser.add_argument('--patience', type=int, default=140,
                         help='maximum number of epochs to train (default: 140)')
-    parser.add_argument('--lr-decay-patience', type=int, default=80,
-                        help='lr decay patience for plateau scheduler')
-    parser.add_argument('--lr-decay-gamma', type=float, default=0.3,
-                        help='gamma of learning rate scheduler decay')
-    parser.add_argument('--weight-decay', type=float, default=0.00001,
-                        help='weight decay')
+    parser.add_argument('--lr-decay-patience','--lr_decay_patience',type=int,
+                        default=80, help='lr decay patience for plateau scheduler')
+    parser.add_argument('--lr-decay-gamma','--lr_decay_gamma', type=float,
+                        default=0.3, help='gamma of learning rate scheduler decay')
+    parser.add_argument('--weight-decay','--weight_decay', type=float,
+                        default=0.00001,help='weight decay')
     parser.add_argument('--seed', type=int, default=42, metavar='S',
                         help='random seed (default: 42)')
 
     # Model Parameters
-    parser.add_argument('--seq-dur', type=float, default=6.0,
+    parser.add_argument('--seq-dur','--seq_dur', type=float, default=6.0,
                         help='Sequence duration in seconds'
                         'value of <=0.0 will use full/variable length')
     parser.add_argument('--unidirectional', action='store_true', default=False,
@@ -173,20 +204,20 @@ def main():
                         help='STFT fft size and window size')
     parser.add_argument('--nhop', type=int, default=1024,
                         help='STFT hop size')
-    parser.add_argument('--hidden-size', type=int, default=512,
+    parser.add_argument('--hidden-size','--hidden_size', type=int, default=512,
                         help='hidden size parameter of dense bottleneck layers')
     parser.add_argument('--bandwidth', type=int, default=16000,
                         help='maximum model bandwidth in herz')
-    parser.add_argument('--nb-channels', type=int, default=2,
+    parser.add_argument('--nb-channels','--nb_channels', type=int, default=2,
                         help='set number of channels for model (1, 2)')
-    parser.add_argument('--nb-workers', type=int, default=0,
+    parser.add_argument('--nb-workers','--nb_workers', type=int, default=0,
                         help='Number of workers for dataloader.')
 
     # Misc Parameters
     parser.add_argument('--quiet', action='store_true', default=False,
                         help='less verbose during training')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
+    parser.add_argument('--no-cuda','--no_cuda', action='store_true',
+                        default=False, help='disables CUDA training')
     
     parser.add_argument(
         '--modelname',
@@ -196,7 +227,7 @@ def main():
     )
     
     parser.add_argument(
-        '--data-augmentation',
+        '--data-augmentation','--data_augmentation',
         default="yes",
         choices=['yes', 'no'],
         type=str,
@@ -204,7 +235,7 @@ def main():
     )
     
     parser.add_argument(
-        '--normalization-style',
+        '--normalization-style','--normalization_style',
         choices=['overall', 'batch-specific','none'],
         type=str,
         help='Use different normalization styles than the default for a model.'
@@ -249,6 +280,25 @@ def main():
     # Load and process training and validation sets
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
     
+    # create output dir if not exist
+    target_path = Path(args.output)
+    target_path.mkdir(parents=True, exist_ok=True)
+    
+    print("Be warned that in the parser, if action='store_false' is used, parameter.cfg file will be broken.")
+    
+    # Save parameters sorted by line, to e.g. easily reuse them later
+    with open(Path(target_path,  'parameters.cfg'), 'w') as outfile:
+        arglist = []
+        for arg in vars(args):
+            value = getattr(args, arg)
+            if value is not None and value != False and value != True:
+                arglist.append("--"+arg+" "+ str(getattr(args, arg)) + "\n")
+            if value == True:
+                arglist.append("--"+arg+"\n")
+        arglist.sort()
+        for arg in arglist:
+            outfile.write(arg)
+
     if args.modelname == 'deep-u-net':
         print("WARNING: Be warned that the sequence length may have been overridden.")
     
@@ -264,10 +314,6 @@ def main():
     print("len(train_dataset[0]):",len(train_dataset[0]))
     print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
     
-    # create output dir if not exist
-    target_path = Path(args.output)
-    target_path.mkdir(parents=True, exist_ok=True)
-    
     train_sampler = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
         **dataloader_kwargs
@@ -277,6 +323,7 @@ def main():
         valid_dataset, batch_size=1,
         **dataloader_kwargs
     )
+   
     """
     examples = enumerate(train_sampler)
     example = next(examples)
@@ -402,7 +449,7 @@ def main():
         
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,tb=args.tb)
         
-        memory_check("After batches from epoch"+str(epoch)+":")
+        #memory_check("After batches from epoch"+str(epoch)+":")
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
         
         scheduler.step(valid_loss)
@@ -447,9 +494,7 @@ def main():
 
         with open(Path(target_path,  args.target + '.json'), 'w') as outfile:
             outfile.write(json.dumps(params, indent=4, sort_keys=True))
-
-        train_times.append(time.time() - end)
-
+        
         if stop:
             print("Apply Early Stopping")
             break

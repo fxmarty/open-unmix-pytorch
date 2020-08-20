@@ -182,6 +182,7 @@ def separate(
     
     estimates = {}
     
+    """
     if modelname == 'open-unmix':
         if residual_model or len(targets) == 1:
             V = norbert.residual_model(V, X, alpha if softmask else 1)
@@ -200,8 +201,8 @@ def separate(
                 n_hopsize=unmix_target.stft.n_hop
             )
             estimates[name] = audio_hat.T
-    
-    if modelname == 'deep-u-net': #or model_name_general == "open-unmix": # without wiener filtering
+    """
+    if modelname == 'deep-u-net' or modelname == "open-unmix": # without wiener filtering
         phase_audio = np.angle(X)[...,np.newaxis]
         Y = phase_audio * V
         

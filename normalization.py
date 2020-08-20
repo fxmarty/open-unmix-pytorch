@@ -8,13 +8,13 @@ class Normalize(nn.Module):
                 input_mean=None,
                 input_scale=None,
                 nb_total_bins=None,
-                print=True
+                imprint=True
     ):
         super(Normalize,self).__init__()
         
         self.normalization_style = normalization_style
         
-        if print == True:
+        if imprint == True:
             print("Normalization set to \"" + self.normalization_style + "\".")
         
         if normalization_style == 'overall':

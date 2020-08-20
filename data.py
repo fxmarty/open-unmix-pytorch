@@ -201,13 +201,13 @@ def load_datasets(parser, args):
         )
 
     elif args.dataset == 'musdb': # Default case
-        parser.add_argument('--is-wav', action='store_true', default=False,
+        parser.add_argument('--is-wav','--is_wav',
+                            action='store_true', default=False,
                             help='loads wav instead of STEMS')
-        parser.add_argument('--samples-per-track', type=int, default=64)
-        parser.add_argument(
-            '--source-augmentations', type=str, nargs='+',
-            default=['gain', 'channelswap']
-        )
+        parser.add_argument('--samples-per-track','--samples_per_track',
+                            type=int, default=64)
+        parser.add_argument('--source-augmentations','--source_augmentations',
+                            type=str, nargs='+', default=['gain', 'channelswap'])
 
         args = parser.parse_args()
         
@@ -765,7 +765,11 @@ class MUSDBDataset(torch.utils.data.Dataset):
             download=download,
             *args, **kwargs
         )
-        self.sample_rate = 8192 #self.mus.tracks[0].rate  # musdb is fixed sample rate
+        if len(self.mus.tracks) > 0:
+            self.sample_rate = self.mus.tracks[0].rate
+        else:
+            self.sample_rate = 44100 # to modify manually
+            
         self.dtype = dtype
         
         if self.data_augmentation == "no":
@@ -811,6 +815,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     dtype=self.dtype
                 )
                 #print(audio.shape)
+                
                 
                 if self.modelname == "deep-u-net":
                     #audio = audio[...,:262144]
