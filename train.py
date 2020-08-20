@@ -21,6 +21,7 @@ import copy
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 import sys
+import normalization
 
 from loss_SISNR import sisnr
 from utils import memory_check
@@ -43,6 +44,11 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,tb="n
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
             Y = unmix.transform(y)
+            
+            # deep-u-net requires normalization for the reference too^
+            if model_name_general == 'deep-u-net':
+                self.normalize_input = normalization.Normalize('batch-specific',print=False)
+                
             loss = torch.nn.functional.mse_loss(Y_hat, Y)
             losses.update(loss.item(), Y.size(1))
         

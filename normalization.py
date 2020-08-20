@@ -7,12 +7,15 @@ class Normalize(nn.Module):
                 normalization_style,
                 input_mean=None,
                 input_scale=None,
-                nb_total_bins=None
+                nb_total_bins=None,
+                print=True
     ):
         super(Normalize,self).__init__()
         
         self.normalization_style = normalization_style
-        print("Normalization set to \"" + self.normalization_style + "\".")
+        
+        if print == True:
+            print("Normalization set to \"" + self.normalization_style + "\".")
         
         if normalization_style == 'overall':
             if input_mean is not None:
