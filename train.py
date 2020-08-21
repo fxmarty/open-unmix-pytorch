@@ -25,35 +25,59 @@ import normalization
 
 from loss_SISNR import sisnr
 from utils import memory_check
+import tf_transforms
 
+import matplotlib.pyplot as plt
 
 tqdm.monitor_interval = 0
 batch_seen = 0
 
-def train(args, unmix, device, train_sampler, optimizer,model_name_general,tb="no"):
+def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch_num,tb="no"):
     losses = utils.AverageMeter()
     unmix.train()
     pbar = tqdm.tqdm(train_sampler, disable=args.quiet)
     global batch_seen
-    #i = 0
+    i = 0
     # Loop by number of tracks * number of samples per track / batch size
     for x, y in pbar:
         torch.autograd.set_detect_anomaly(True)
 
-        """
-        if i == 0:
-            print("x:",x)
-            print("y:",y)
-            print("----")
-        i = i + 1
-        """
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-                
+        
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
-            Y = unmix.transform(y)
+            #Y = unmix.transform(y)
+            Y = unmix.transform(x)
+            
+            if epoch_num == 20:
+                Y_np = np.array(Y.detach().cpu())
+                Y_hat_np = np.array(Y_hat.detach().cpu())
+                tps = np.linspace(0,x.shape[2]/unmix.sp_rate,Y_np.shape[0])
+                freq = np.linspace(0,unmix.sp_rate//2,Y_np.shape[-1])
+                """
+                print("Shape de Y_np:",Y_np.shape)
+                print("Shape du plot:",Y_np[:,0,0,:].T.shape)
+                print("shape du tps:",tps.shape)
+                print("shape du freq:", freq.shape)
+                """
+                
+                # same color scale
+                plt.pcolormesh(tps, freq, Y_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
+                plt.title('STFT Magnitude for the target')
+                plt.ylabel('Frequency [Hz]')
+                plt.xlabel('Time [sec]')
+                
+                plt.savefig('stft_'+str(epoch_num)+'-'+str(i)+'_target.png')
+                
+                plt.pcolormesh(tps, freq, Y_hat_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
+                plt.title('STFT Magnitude for the estimate')
+                plt.ylabel('Frequency [Hz]')
+                plt.xlabel('Time [sec]')
+                
+                plt.savefig('stft_'+str(epoch_num)+'-'+str(i)+'_estimate.png')
+                i = i + 1
             
             """
             # deep-u-net requires normalization for the reference too
@@ -323,7 +347,7 @@ def main():
         valid_dataset, batch_size=1,
         **dataloader_kwargs
     )
-   
+    
     """
     examples = enumerate(train_sampler)
     example = next(examples)
@@ -447,7 +471,7 @@ def main():
         t.set_description("Training Epoch")
         end = time.time()
         
-        train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,tb=args.tb)
+        train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
         
         #memory_check("After batches from epoch"+str(epoch)+":")
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)

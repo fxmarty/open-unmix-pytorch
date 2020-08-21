@@ -1,13 +1,14 @@
 #import sys
 #sys.path.append("/home/felix/Documents/Mines/Césure/_Stage Télécom/open-unmix-pytorch/")
-from model import Spectrogram, STFT, NoOp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_model_summary
 from torchsummary import summary
 import math
+
 import normalization
+import tf_transforms
 
 def valid_length(length):
     """
@@ -94,15 +95,17 @@ class Deep_u_net(nn.Module):
         """
 
         super(Deep_u_net, self).__init__()
-        self.stft = STFT(n_fft=n_fft, n_hop=n_hop)
-        self.spec = Spectrogram(power=1, mono=(nb_channels == 1))
+        self.stft = tf_transforms.STFT(n_fft=n_fft, n_hop=n_hop)
+        self.spec = tf_transforms.Spectrogram(power=1, mono=(nb_channels == 1))
         self.print = print
         
         # register sample_rate to check at inference time
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
+        
+        self.sp_rate = sample_rate
 
         if input_is_spectrogram:
-            self.transform = NoOp()
+            self.transform = tf_transforms.NoOp()
         else:
             self.transform = nn.Sequential(self.stft, self.spec)
         
@@ -134,14 +137,7 @@ class Deep_u_net(nn.Module):
             in_chans = 16*2**i
             self.decoder.append(deconv_block(in_chans,in_chans//4,dropout=False))
         
-        self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation='sigmoid',batchnorm=False)) # stereo output
-        
-        self.output_scale = nn.Parameter(
-            torch.ones(self.nb_output_bins).float()
-        )
-        self.output_mean = nn.Parameter(
-            torch.ones(self.nb_output_bins).float()
-        )
+        self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation='relu',batchnorm=False)) # stereo output
         
 
     def forward(self, mix):
@@ -150,6 +146,7 @@ class Deep_u_net(nn.Module):
         # transform to spectrogram on the fly
         x = self.transform(mix)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
+        #print(nb_frames, nb_samples, nb_channels, nb_bins)
         
         if self.print == True:print("After transform:",x.shape)
         # reshape to the conventional shape for cnn in pytorch
@@ -157,8 +154,8 @@ class Deep_u_net(nn.Module):
         
         x_original = x.detach().clone()
                 
-        x = self.normalize_input(x)
-        
+        #x = self.normalize_input(x)
+                
         saved = []
         saved_pad = []
         
@@ -198,11 +195,8 @@ class Deep_u_net(nn.Module):
         if self.print == True: print("Before slicing:",x.shape)
         x = x[...,pad_h_l:-pad_h_r or None,pad_w_l:-pad_w_r or None]
         if self.print == True: print("After slicing:",x.shape)
-        
-        x = x * self.output_scale
-        x = x + self.output_mean
-        
-        x = F.relu(x) * x_original
+                
+        x = x * x_original
         x = x.permute(2,0,1,3)
         return x # return the magnitude spectrogram of the estimated source
 
@@ -210,17 +204,18 @@ if __name__ == '__main__':
     import numpy as np
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    nb_channels = 1
     deep_u_net = Deep_u_net(
-        nb_channels=2,
+        nb_channels=nb_channels,
         sample_rate=8192,
         n_fft=1024,
         n_hop=768,
         print=True
         ).to(device)
     
-    time = 6*44100
+    time = 98560
     #print(deep_u_net)    
-    mix = (torch.rand(16, 2, time)+2)**2
+    mix = (torch.rand(16, nb_channels, time)+2)**2
     mix = mix.to(device)
     deep_u_net.forward(mix)
     
