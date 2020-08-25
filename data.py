@@ -278,6 +278,11 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 track.targets[self.target].audio.T,
                 dtype=self.dtype
             )
+            
+            if self.nb_channels == 1: # use only left channel
+                x = torch.unsqueeze(x[0],0)
+                y = torch.unsqueeze(y[0],0)
+            #if nb_channels = 2, use both channels
 
         return x, y
 

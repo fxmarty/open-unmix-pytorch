@@ -19,16 +19,14 @@ class TemporalBlock(nn.Module):
                  dilation):
         super(TemporalBlock, self).__init__()
 
-        
         self.kernel_size = kernel_size
         self.stride,self.padding,self.dilation = stride,padding,dilation
         
-        self.conv1x1 = nn.Conv1d(in_channels, hidden_channels, 1, bias=False)
+        self.conv1x1 = nn.Conv1d(in_channels, hidden_channels, kernel_size=1, bias=False)
         
         self.nonlinearity1 = nn.PReLU()
         
         self.norm1 = nn.GroupNorm(1, hidden_channels, eps=1e-08)
-        
         
         self.depthwise_conv = nn.Conv1d(hidden_channels,
                                    hidden_channels,
@@ -49,17 +47,13 @@ class TemporalBlock(nn.Module):
 
     def forward(self, input):
         #checkValidConvolution(input.size(2),1)
-        #memory_check("inside TemporalBlock")
         output = self.norm1(self.nonlinearity1(self.conv1x1(input)))
-        #memory_check("inside TemporalBlock")
         #checkValidConvolution(output.size(2),self.kernel_size,self.stride,self.padding,self.dilation)
         output = self.norm2(self.nonlinearity2(self.depthwise_conv(output)))
-        #memory_check("inside TemporalBlock")
         
         #checkValidConvolution(output.size(2),self.kernel_size)
         residual = self.res_out(output)
         skip = self.skip_out(output)
-        #memory_check("inside TemporalBlock")
         return residual, skip
 
 
@@ -71,12 +65,12 @@ class ConvTasNet(nn.Module):
         sample_rate=44100,
         print=False,
         N=512,
-        L=16,
+        L=20, # Originally 16, but 20 for 44100 Hz
         B=128,
         H=512,
-        Sc=128, # to modify
+        Sc=128,
         P=3,
-        X=8,
+        X=10, # Originally 8, but 10 for same receptive field at for 44100 Hz
         R=3,
         C=1 # We usually only extract one source
     ):
@@ -112,22 +106,18 @@ class ConvTasNet(nn.Module):
         self.L = L
         self.print = print
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
+        self.sp_rate = sample_rate
         
         self.normalize_input = normalization.Normalize(normalization_style)
         
         # Encoder part
-        """
         self.encoder = nn.Sequential(
-                                nn.Conv1d(nb_channels,N,kernel_size=L,stride=L // 2),
-                                nn.ReLU()
-                                )
-        """
-        
-        self.encoder = nn.Conv1d(nb_channels,N,kernel_size=L,stride=L // 2)
+                            nn.Conv1d(nb_channels,N,kernel_size=L,stride=L // 2),
+                            nn.ReLU()
+                        )
         
         # Separation part
         self.layerNorm = nn.GroupNorm(1, N, eps=1e-8)
-        # [M, N, K] -> [M, B, K]
         self.bottleneck_conv1x1 = nn.Conv1d(N, B, 1, bias=False)
         
         self.repeats = nn.ModuleList()
@@ -147,9 +137,7 @@ class ConvTasNet(nn.Module):
                                             dilation=dilation)
                             )
             self.repeats.append(repeat)
-        
-        # [M, B, K] -> [M, C*N, K]
-        
+                
         self.output = nn.Sequential(nn.PReLU(),
                                     nn.Conv1d(Sc, C * N, 1),
                                     nn.Sigmoid()
@@ -160,105 +148,84 @@ class ConvTasNet(nn.Module):
     def pad_signal(self,input):
         use_cuda = torch.cuda.is_available() #overrides no-cuda parameter. Take care!
         device = torch.device("cuda" if use_cuda else "cpu")
-        memory_check("")
+        
         # input is the waveforms: (batch_size,nb_channels,T)
         batch_size = input.size(0)
         nb_channels = input.size(1)
         nsample = input.size(2)
-        memory_check("")
-        # pad at least 8 each side
+        
+        # pad at least self.L//2 each side
         ideal_size = valid_length(nsample+2*self.L//2,self.L,stride=self.L//2)
         padding_size = ideal_size - nsample 
-        memory_check("")
+        
         pad_aux_left = torch.zeros(batch_size,nb_channels,padding_size//2).to(device)
         pad_aux_right = torch.zeros(batch_size,nb_channels,padding_size - padding_size//2).to(device)
-        input = torch.cat([pad_aux_left, input, pad_aux_right], 2)
-        memory_check("")
-        return input, padding_size
+        outut = torch.cat([pad_aux_left, input, pad_aux_right], 2)
+        return outut, padding_size
 
-    def forward(self, mix):
+    def forward(self, x):
         
-        memory_check("A debut de forward:")
+        # Padding, output [nb_samples, nb_channels, nb_timesteps_ideal]
+        x,padding_size = self.pad_signal(x)
         
-        if self.print == True: print(mix.shape)
-        # Padding
-        mix,padding_size = self.pad_signal(mix)
-        memory_check("After padding:")
         # Input normalization
-        mix = self.normalize_input(mix) # does nothing by default
-        memory_check("After normalization:")
-        # Encoder
-        print("A BESOIN DU GRAD:",mix.requires_grad)
-        if self.print == True: print(mix.shape)
-        #checkValidConvolution(mix.size(2),kernel_size=self.L,stride=self.L // 2,note="encoder")
-        mix = self.encoder(mix)
-        if self.print == True: print(mix.shape)
+        x = self.normalize_input(x) # does nothing by default
         
-        memory_check("after encoder:")
-        x = self.layerNorm(mix)
-        if self.print == True: print(x.shape)
-        memory_check("after layernorm:")
+        # Encoder
+        #checkValidConvolution(x.size(2),kernel_size=self.L,stride=self.L // 2,note="encoder")
+        x = self.encoder(x) # output [nb_samples, N, hidden_size]
+        mix_encoded = x.detach().clone()
+        
+        # Separation
+        x = self.layerNorm(x) # output [nb_samples, N, hidden_size]
         
         #checkValidConvolution(x.size(2),kernel_size=1)
-        output = self.bottleneck_conv1x1(x)
-        memory_check("after bottleneck conv:")
+        output = self.bottleneck_conv1x1(x) #output [nb_samples, B, hidden_size]
         skip_connection = 0.
-        if self.print == True: print(output.shape)
         
-        #memory_check("before repeat blocks:")
         i = 0
         for repeat in self.repeats:
             for temporalBlock in repeat:
-                memory_check(str(i) + ":")
-                residual, skip = temporalBlock(output)
-                memory_check(str(i) + "after temporalBlock:")
+                # residual [nb_samples, Sc, hidden_size]
+                # skip [nb_samples, B, hidden_size]
+                residual, skip = temporalBlock(output) 
                 skip_connection = skip_connection + skip
-                memory_check(str(i) + ":")
-                if self.print == True: print("skip_connection size:",skip_connection.shape)
                 output = output + residual
-                memory_check(str(i) + ":")
-                if self.print == True: print(i,":",output.shape)
                 i=i+1
             
-        
         #checkValidConvolution(skip_connection.size(2),kernel_size=1)
-        x = self.output(skip_connection)
-        if self.print == True: print(x.shape)
-        masks = x.view(-1, self.C, self.N, x.shape[-1])
-        if self.print == True: print("masks:",masks.shape)
+        x = self.output(skip_connection) # output [nb_samples, C*N, hidden_size]
+
+        # output [nb_samples, C, N, hidden_size]
+        masks = x.view(-1, self.C, self.N, x.shape[-1]) 
         
-        memory_check("Presque avant fin :")
-        mix = torch.unsqueeze(mix,1)
-        if self.print == True: print("mix_encoded:",mix.shape)
+        mix_encoded = torch.unsqueeze(mix_encoded,1)
         
-        x = masks * mix # mix means mix_encoded
-        if self.print == True: print("ok",x.shape)
+        x = masks * mix_encoded # output [nb_samples, C, N, hidden_size]
         
-        x = x.view(x.shape[0]*self.C,self.N,-1)
-        if self.print == True: print(x.shape)
-        x = self.decoder(x)
-        if self.print == True: print(x.shape)
-        x = x[:,:,padding_size//2:-(padding_size - padding_size//2)]#.contiguous()  
-        if self.print == True: print(x.shape)
-        #memory_check("A la fin :")
+        x = x.view(x.shape[0]*self.C,self.N,-1) # output [nb_samples * C, N, hidden_size]
+        x = self.decoder(x) # output [nb_samples, nb_channels, nb_timesteps_ideal]
+
+        # output [nb_samples, nb_channels, nb_timesteps]
+        x = x[:,:,padding_size//2:-(padding_size - padding_size//2)]  
+        
         return x
 
 if __name__ == '__main__':
     import numpy as np
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ConvTasNet(print=False,nb_channels=1).to(device)
+    model = ConvTasNet(print=True,nb_channels=1).to(device)
     model.eval()
     
-    taille = int(5*60*44100)
+    taille = int(2.2*44100)
     #print(deep_u_net)    
-    mix = (torch.rand(1, 1, taille)+2)#.detach()
+    mix = (torch.rand(4, 1, taille)+2)#.detach()
     mix = mix.to(device)
-    with torch.no_grad():
-        res = model(mix)   
+    #with torch.no_grad():
+    res = model(mix)   
     #model.pad_signal(mix)
     #print(torch.cuda.max_memory_allocated(0)/1e9)
-    
     
     #print(pytorch_model_summary.summary(model, mix, show_input=False))
     

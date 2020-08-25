@@ -39,8 +39,6 @@ class STFT(nn.Module):
         #print(x.shape)
         # compute stft with parameters as close as possible scipy settings
         
-        #TOSEE: There are some weird stuff happening here with the temporal size
-        # T of the stft. Not sure to understand how it is zero-padded.
         stft_f = torch.stft(
             x,
             n_fft=self.n_fft, hop_length=self.n_hop,
@@ -80,10 +78,10 @@ class Spectrogram(nn.Module):
         # -1 for the last column, we don't take the spectrogram at a power of 2
         stft_f = stft_f.pow(2).sum(-1).pow(self.power / 2.0)
         
-        """
-        # If nb_channels = 1, downmix in the mag domain
+        
+        # If nb_channels = 1, downmix in the mag domain, A MODIFIER
         if self.mono:
             stft_f = torch.mean(stft_f, 1, keepdim=True)
-        """
+        
         # permute output for LSTM convenience
         return stft_f.permute(2, 0, 1, 3)

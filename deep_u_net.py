@@ -9,27 +9,11 @@ import math
 
 import normalization
 import tf_transforms
-
-def valid_length(length):
-    """
-    Return the nearest valid length to use with the model so that
-    there is no time steps left over in a convolutions, e.g. for all
-    layers, size of the (input - kernel_size) % stride = 0.
-
-    For training, extracts should have a valid length.
-    
-    This is for testing purposes and is NOT used in the model.
-    """
-    for _ in range(6):
-        length = math.ceil((length - 5) / 2) + 1
-    for _ in range(6):
-        length = (length - 1) * 2 + 5
-
-    return int(length)
+from utils import checkValidConvolution
 
 def conv_block(in_chans,out_chans):
     return nn.Sequential(
-        nn.Conv2d(in_chans, out_chans, kernel_size=5,stride=2),
+        nn.Conv2d(in_chans, out_chans, kernel_size=4,stride=2,padding=1),
         nn.LeakyReLU(0.2),
         nn.BatchNorm2d(out_chans)
     )
@@ -41,7 +25,7 @@ def deconv_block(in_chans,out_chans,dropout=True,
                 ['sigmoid', nn.Sigmoid()],
                 ['relu', nn.ReLU()]
     ])
-    layers = [nn.ConvTranspose2d(in_chans,out_chans,kernel_size=5,stride=2)]
+    layers = [nn.ConvTranspose2d(in_chans,out_chans,kernel_size=4,stride=2,padding=1)]
             
     if dropout == True:
         layers.append(nn.Dropout2d(0.5))
@@ -52,27 +36,7 @@ def deconv_block(in_chans,out_chans,dropout=True,
         layers.append(nn.BatchNorm2d(out_chans))
     
     return nn.Sequential(*layers)
-    
-    # Division (input_size - kernel_size + padding)/stride must be an integer
-def padPerfectly(kernel_size,heigh,width,stride):
-    padding_h = 0
-    padding_w = 0
-    
-    if (heigh - kernel_size) % stride != 0:
-        # Compute the division above without padding (which may be a float)
-        divisionValue_idealPadding_h = (heigh - kernel_size)/stride
-        padding_h = math.ceil(
-                    divisionValue_idealPadding_h*stride/(heigh - kernel_size))
-        
-    if (width - kernel_size) % stride != 0:
-        divisionValue_idealPadding_w = (width - kernel_size)/stride
-        padding_w = math.ceil(
-                    divisionValue_idealPadding_w*stride/(width - kernel_size))
-    
-    # Reverse heigh and width order according to F.pad behavior
-    return (padding_w//2+1,(padding_w - padding_w//2)+1,
-            padding_h//2+1,(padding_h - padding_h//2)+1)
-    
+
 class Deep_u_net(nn.Module):
     def __init__(
         self,
@@ -139,6 +103,7 @@ class Deep_u_net(nn.Module):
         
         self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation='relu',batchnorm=False)) # stereo output
         
+        
 
     def forward(self, mix):
         if self.print == True:print("original size:",mix.shape)
@@ -154,35 +119,26 @@ class Deep_u_net(nn.Module):
         
         x_original = x.detach().clone()
                 
-        #x = self.normalize_input(x)
-                
+        x = self.normalize_input(x)
+        
+        x = x[...,:512] # keep 512 and not 513 frequency bins
+        
         saved = []
-        saved_pad = []
         
         for encode in self.encoder:
-            perfectPad = padPerfectly(5,x.shape[-2],x.shape[-1],2)
-            saved_pad.append(perfectPad)
-            
-            if self.print == True: print("Before padding encoder:",x.shape)
-            x = F.pad(x,perfectPad)
+            if self.print == True: print("Before encoding:",x.shape)
             saved.append(x)
-            if self.print == True: print("After padding encoder:",x.shape)
-            
             x = encode(x)
+            #checkValidConvolution(x.shape[-1],kernel_size=4,stride=2,padding=1,note="encoder conv block")
+            #checkValidConvolution(x.shape[-2],kernel_size=4,stride=2,padding=1,note="encoder conv block")
             if self.print == True: print("----CONVOL")
         
-        saved_pad.append((0,0,0,0)) # after the last convolution, we do not pad
-
         if self.print == True: print("debut decoder:",x.shape)
         for decode in self.decoder:
-            pad_w_l,pad_w_r,pad_h_l,pad_h_r = saved_pad.pop()
-            
-            if self.print == True: print("Before slicing:",x.shape)
-            x = x[...,pad_h_l:-pad_h_r or None,pad_w_l:-pad_w_r or None]
-            if self.print == True: print("After slicing:",x.shape)
+            if self.print == True: print("Before decoding:",x.shape)
 
             x = decode(x)
-            if self.print == True: print("After deconv:",x.shape)
+            if self.print == True: print("After decoding:",x.shape)
             
             if len(saved) > 1:
                 y = saved.pop(-1)
@@ -191,13 +147,13 @@ class Deep_u_net(nn.Module):
             
             if self.print == True: print("----DECONVOL")
         
-        pad_w_l,pad_w_r,pad_h_l,pad_h_r = saved_pad.pop()
-        if self.print == True: print("Before slicing:",x.shape)
-        x = x[...,pad_h_l:-pad_h_r or None,pad_w_l:-pad_w_r or None]
-        if self.print == True: print("After slicing:",x.shape)
-                
+        # we go back to 513 bins and mutiply the original spectrogram by our mask
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        ones = torch.ones(nb_samples,nb_channels,nb_frames,1).to(device)
+        x = torch.cat((x,ones),3)
         x = x * x_original
         x = x.permute(2,0,1,3)
+        #print("output:",x.shape)
         return x # return the magnitude spectrogram of the estimated source
 
 if __name__ == '__main__':
@@ -214,7 +170,6 @@ if __name__ == '__main__':
         ).to(device)
     
     time = 98560
-    #print(deep_u_net)    
     mix = (torch.rand(16, nb_channels, time)+2)**2
     mix = mix.to(device)
     deep_u_net.forward(mix)
