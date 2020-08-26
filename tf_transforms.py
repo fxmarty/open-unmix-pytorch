@@ -59,12 +59,10 @@ class STFT(nn.Module):
 class Spectrogram(nn.Module):
     def __init__(
         self,
-        power=1,
-        mono=True
+        power=1
     ):
         super(Spectrogram, self).__init__()
         self.power = power
-        self.mono = mono
 
     def forward(self, stft_f):
         """
@@ -74,14 +72,10 @@ class Spectrogram(nn.Module):
             (nb_frames, nb_samples, nb_channels, nb_bins)
         """
         stft_f = stft_f.transpose(2, 3) # put nb_frames before nb_bins
+        
         # take the magnitude
         # -1 for the last column, we don't take the spectrogram at a power of 2
         stft_f = stft_f.pow(2).sum(-1).pow(self.power / 2.0)
-        
-        
-        # If nb_channels = 1, downmix in the mag domain, A MODIFIER
-        if self.mono:
-            stft_f = torch.mean(stft_f, 1, keepdim=True)
         
         # permute output for LSTM convenience
         return stft_f.permute(2, 0, 1, 3)

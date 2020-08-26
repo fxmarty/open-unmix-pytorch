@@ -32,6 +32,7 @@ def sisdr(estimates, targets, eps=1e-8):
 
     # [batch_size,1,1]
     SI_SDR = - 10*torch.log10(Starg/(eps+Sres) + eps)
+    #SI_SDR = - 10*(torch.log10(Starg + eps) - torch.log10(Sres + eps))
 
     return torch.mean(SI_SDR) # return mean over all samples in a batch
 

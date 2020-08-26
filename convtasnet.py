@@ -8,6 +8,7 @@ from utils import checkValidConvolution, valid_length, memory_check
 
 import normalization
 
+# The temporal block preserves the length of the signal received as input
 class TemporalBlock(nn.Module):
     def __init__(self,
                  in_channels,
@@ -63,7 +64,6 @@ class ConvTasNet(nn.Module):
         normalization_style='none',
         nb_channels=2,
         sample_rate=44100,
-        print=False,
         N=512,
         L=20, # Originally 16, but 20 for 44100 Hz
         B=128,
@@ -76,7 +76,7 @@ class ConvTasNet(nn.Module):
     ):
         """
         Input: (nb_samples, nb_channels, nb_timesteps)
-        Output: (nb_samples, nb_channels, nb_timesteps)
+        Output: (nb_samples, C, nb_channels, nb_timesteps)
         
         Parameters
         ----------
@@ -107,6 +107,7 @@ class ConvTasNet(nn.Module):
         self.print = print
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
         self.sp_rate = sample_rate
+        self.nb_channels = nb_channels
         
         self.normalize_input = normalization.Normalize(normalization_style)
         
@@ -164,7 +165,8 @@ class ConvTasNet(nn.Module):
         return outut, padding_size
 
     def forward(self, x):
-        
+        nb_samples = x.shape[0]
+
         # Padding, output [nb_samples, nb_channels, nb_timesteps_ideal]
         x,padding_size = self.pad_signal(x)
         
@@ -204,18 +206,18 @@ class ConvTasNet(nn.Module):
         x = masks * mix_encoded # output [nb_samples, C, N, hidden_size]
         
         x = x.view(x.shape[0]*self.C,self.N,-1) # output [nb_samples * C, N, hidden_size]
-        x = self.decoder(x) # output [nb_samples, nb_channels, nb_timesteps_ideal]
-
-        # output [nb_samples, nb_channels, nb_timesteps]
-        x = x[:,:,padding_size//2:-(padding_size - padding_size//2)]  
+        x = self.decoder(x) # output [nb_samples * C, nb_channels, nb_timesteps_ideal]
+        x = x.view(nb_samples,self.C,self.nb_channels,-1) # output [nb_samples, C, nb_channels, nb_timesteps_ideal]
         
+        # output padding [nb_samples, nb_channels, nb_timesteps]
+        x = x[:,:,:,padding_size//2:-(padding_size - padding_size//2)]  
         return x
 
 if __name__ == '__main__':
     import numpy as np
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ConvTasNet(print=True,nb_channels=1).to(device)
+    model = ConvTasNet(nb_channels=1,C=2).to(device)
     model.eval()
     
     taille = int(2.2*44100)

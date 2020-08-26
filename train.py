@@ -58,7 +58,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
             Y = unmix.transform(y)
-            MIX = unmix.transform(x)
+            #MIX = unmix.transform(x)
             """
             if epoch_num % 2 == 0 and i <=5 and model_name_general == 'deep-u-net':
                 Y_np = np.array(Y.detach().cpu())
@@ -147,6 +147,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
                 torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'mixture.wav', x[0][0].detach().cpu(), unmix.sp_rate)
             """
             loss = sisdr(y_hat,y)
+            torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
             losses.update(loss.item(), x.size(0))
            
         i = i + 1
@@ -206,7 +207,7 @@ def get_statistics(args, dataset):
 
     spec = torch.nn.Sequential(
         tf_transforms.STFT(n_fft=args.nfft, n_hop=args.nhop),
-        tf_transforms.Spectrogram(mono=True)
+        tf_transforms.Spectrogram()
     )
 
     dataset_scaler = copy.deepcopy(dataset)
@@ -221,6 +222,8 @@ def get_statistics(args, dataset):
         x, y = dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
         X = spec(x[None, ...])
+        if args.nb_channels == 2: # required by partial_fit
+            X = torch.mean(X, 2, keepdim=True)
         scaler.partial_fit(np.squeeze(X))
 
     # set inital input scaler values
@@ -259,7 +262,7 @@ def main():
     parser.add_argument('--lr', type=float, default=0.001,
                         help='learning rate, defaults to 1e-3')
     parser.add_argument('--patience', type=int, default=140,
-                        help='maximum number of epochs to train (default: 140)')
+                        help='maximum number of epochs to train without improvement of the validation loss(default: 140)')
     parser.add_argument('--lr-decay-patience','--lr_decay_patience',type=int,
                         default=80, help='lr decay patience for plateau scheduler')
     parser.add_argument('--lr-decay-gamma','--lr_decay_gamma', type=float,
@@ -318,11 +321,11 @@ def main():
     
     parser.add_argument('--tb', default=None,
                         help='use tensorboard, and if so, set name')
-    
+    """
     parser.add_argument('--verbose',
                         action='store_true',
                         help='Print details during training process')
-
+    """
     args, _ = parser.parse_known_args()
     
     # Make normalization-style argument not mendatory
@@ -381,13 +384,19 @@ def main():
         print("WARNING: Data augmentation has been disabled.")
     
     print("Sampling rate of dataset:",train_dataset.sample_rate,"Hz")
-    print("Size validation set:",len(valid_dataset))
-    print("Size train set:",len(train_dataset))
+    print("Size validation set:",len(valid_dataset),"(",len(valid_dataset.mus.tracks),
+            "*",valid_dataset.samples_per_track,", number of tracks * samples per track)")
+    print("Size train set:",len(train_dataset),"(",len(train_dataset.mus.tracks),
+            "*",train_dataset.samples_per_track,", number of tracks * samples per track)")
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
-        
+    print("---")
     print("len(train_dataset):",len(train_dataset))
     print("len(train_dataset[0]):",len(train_dataset[0]))
     print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
+    print("---")
+    print("len(valid_dataset):",len(valid_dataset))
+    print("len(valid_dataset[0]):",len(valid_dataset[0]))
+    print("valid_dataset[0][0].shape:",valid_dataset[0][0].shape)
     
     train_sampler = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
@@ -437,14 +446,12 @@ def main():
             n_fft=args.nfft,
             n_hop=args.nhop,
             max_bin=max_bin,
-            sample_rate=train_dataset.sample_rate,
-            print = args.verbose
+            sample_rate=train_dataset.sample_rate
         ).to(device)
         
     elif args.modelname == 'deep-u-net':
         unmix = deep_u_net.Deep_u_net(
             normalization_style=args.normalization_style,
-            print = args.verbose,
             n_fft=args.nfft,
             n_hop=args.nhop,
             nb_channels=args.nb_channels,
@@ -457,7 +464,6 @@ def main():
     elif args.modelname == 'convtasnet':
         unmix = convtasnet.ConvTasNet(
             normalization_style=args.normalization_style,
-            print=args.verbose,
             sample_rate=train_dataset.sample_rate,
             nb_channels=args.nb_channels
         ).to(device)

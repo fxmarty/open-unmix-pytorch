@@ -45,7 +45,7 @@ class OpenUnmix(nn.Module):
         self.hidden_size = hidden_size
 
         self.stft = tf_transforms.STFT(n_fft=n_fft, n_hop=n_hop)
-        self.spec = tf_transforms.Spectrogram(power=power, mono=(nb_channels == 1))
+        self.spec = tf_transforms.Spectrogram(power=power)
         
         # model parameter, saved in state_dict but not trainable
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
@@ -113,7 +113,6 @@ class OpenUnmix(nn.Module):
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
 
         mix = x.detach().clone()
-        #print(mix.shape)
         
         # crop, because we don't necessarily keep all bins due to the bandwidth
         x = x[..., :self.nb_bins]

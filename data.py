@@ -9,6 +9,9 @@ import tqdm
 import librosa
 import numpy as np
 
+import random
+random.seed(42)
+
 class Compose(object):
     """Composes several augmentation transforms.
     Args:
@@ -39,11 +42,6 @@ def load_datasets(parser, args):
     
     Returns:
         train_dataset, validation_dataset
-    """
-    """
-    print(parser)
-    print("-----")
-    print(args)
     """
     if args.dataset == 'musdb': # Default case
         parser.add_argument('--is-wav','--is_wav',
@@ -80,9 +78,13 @@ def load_datasets(parser, args):
             **dataset_kwargs
         )
 
+        # samples_per_track is 1 for stereo case, 2 for mono case, and that is
+        # because MUSDB is a stereo dataset. If we train for the mono case,
+        # both left and right tracks will be used for validation.
         valid_dataset = MUSDBDataset(
             modelname = args.modelname, split='valid',
-            samples_per_track=1, seq_duration=None,
+            samples_per_track=3-args.nb_channels, seq_duration=None,
+            nb_channels=args.nb_channels,
             **dataset_kwargs
         )
 
@@ -160,7 +162,6 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.random_track_mix = random_track_mix
         self.data_augmentation = data_augmentation
         self.nb_channels = nb_channels
-        #print("download:",download)
         self.mus = musdb.DB(
             root=root,
             is_wav=is_wav,
@@ -173,13 +174,12 @@ class MUSDBDataset(torch.utils.data.Dataset):
             self.sample_rate = self.mus.tracks[0].rate
         
         else:
-            self.sample_rate = 8192 # to modify manually
+            self.sample_rate = 44100 # to modify manually for minimal tests
         
         self.dtype = dtype
         
-        if self.data_augmentation == "no":
+        if self.data_augmentation == 'no': # save tracks numbers
             self.dataindex = torch.zeros(len(self.mus),self.samples_per_track)
-            
             for i in range(len(self.mus)):
                 track = self.mus.tracks[i]
                 for j in range(self.samples_per_track):
@@ -202,14 +202,14 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     target_ind = k
                 
                 # select a random track if data augmentation
-                if self.random_track_mix and self.data_augmentation == "yes":
+                if self.random_track_mix and self.data_augmentation == 'yes':
                     track = random.choice(self.mus.tracks)
                 
                 # set the excerpt duration
                 track.chunk_duration = self.seq_duration
                                 
                 # set random start position if data augmentation
-                if self.data_augmentation == "yes":
+                if self.data_augmentation == 'yes':
                     track.chunk_start = random.uniform(
                         0, track.duration - self.seq_duration)
                 else:
@@ -220,24 +220,20 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     track.sources[source].audio.T,
                     dtype=self.dtype
                 )
-                #print(audio.shape)
-                
                 
                 if self.modelname == 'deep-u-net':
                     #audio = audio[...,:262144]
                     audio = audio[...,:98560] # for testing purpose, 128 frames
                     #print(audio.shape)
-                
-                #print(track.sources[source])
-                #print(audio.shape)
-                
-                if self.data_augmentation == "yes":
+                                
+                if self.data_augmentation == 'yes':
                     audio = self.source_augmentations(audio)
                 
-                if self.nb_channels == 1: # use only left channel
-                    audio_sources.append(torch.unsqueeze(audio[0],0))
-                if self.nb_channels == 2:
-                    audio_sources.append(audio) # use both channels
+                if self.nb_channels == 1: # select randomly left or right channel
+                    channel_number = random.randint(0, 1) 
+                    audio_sources.append(torch.unsqueeze(audio[channel_number],0))
+                if self.nb_channels == 2: # use both channels
+                    audio_sources.append(audio)
                     
             # create stem tensor of shape (source, channel, samples)
             stems = torch.stack(audio_sources, dim=0)
@@ -251,20 +247,6 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 vocind = list(self.mus.setup['sources'].keys()).index('vocals')
                 # apply time domain subtraction
                 y = x - stems[vocind]
-    
-            # create stem tensor of shape (source, channel, samples)
-            stems = torch.stack(audio_sources, dim=0)
-            # # apply linear mix over source index=0
-            x = stems.sum(0)
-            # get the target stem
-            if target_ind is not None:
-                y = stems[target_ind]
-            # assuming vocal/accompaniment scenario if target!=source
-            else:
-                vocind = list(self.mus.setup['sources'].keys()).index('vocals')
-                # apply time domain subtraction
-                y = x - stems[vocind]
-
 
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
@@ -279,10 +261,11 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 dtype=self.dtype
             )
             
-            if self.nb_channels == 1: # use only left channel
-                x = torch.unsqueeze(x[0],0)
-                y = torch.unsqueeze(y[0],0)
-            #if nb_channels = 2, use both channels
+            if self.nb_channels == 1: # select randomly left or right channel
+                channel_number = random.randint(0, 1) 
+                x = torch.unsqueeze(x[channel_number],0)
+                y = torch.unsqueeze(y[channel_number],0)
+            # if nb_channels = 2, use both channels
 
         return x, y
 
