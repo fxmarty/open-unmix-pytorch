@@ -27,7 +27,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
 
     if not model_path.exists():
         raise NameError('Model path is wrong')
-            # assume model is a path to a local model_name direcotry
+            # assume model is a path to a local model_name directory
     else:
         # load model from disk
         with open(Path(model_path, target + '.json'), 'r') as stream:
@@ -77,7 +77,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
         unmix.eval()
         unmix.to(device)
             
-        return unmix,results['args']['modelname']
+        return unmix,results['args']['modelname'],results['args']['nb_channels']
 
 
 def istft(X, rate=44100, n_fft=4096, n_hopsize=1024):
@@ -142,18 +142,28 @@ def separate(
     """
     # convert numpy audio to torch
     audio_torch = torch.tensor(audio.T[None, ...]).float().to(device)
-    #print("Audio size ",audio_torch.shape) #(1,2,nb_time_points)
+    # audio_torch shape [1,2,nb_time_points]
+
     source_names = []
-    V = [] # ????
+    V = []
 
     for j, target in enumerate(tqdm.tqdm(targets)): # tqdm for progress bar
-        unmix_target,modelname = load_model(
+        unmix_target,modelname,nb_channels_model = load_model(
             target=target,
             model_name=model_name,
             device=device
         )
-        Vj = unmix_target(audio_torch).cpu().detach().numpy()
-        #print(Vj.shape)
+        
+        # If the model takes mono as input, put the channels in the number of samples dim
+        if nb_channels_model == 1: 
+            mixture = audio_torch.view(2,1,-1) # [2,1,nb_time_points]
+        
+        Vj = unmix_target(mixture).cpu().detach().numpy()
+        
+        # Revert to channel dimension if mono model
+        if nb_channels_model == 1: 
+            Vj = Vj.reshape(Vj.shape[0],1,2,-1) # [nb_frames, 1, 2, nb_bins]
+        
         if softmask:
             # only exponentiate the model if we use softmask
             Vj = Vj**alpha
@@ -168,21 +178,18 @@ def separate(
         
     if modelname in ('open-unmix','deep-u-net'):
         V = np.transpose(np.array(V), (1, 3, 2, 0))
-        #print("V:",V.shape) #mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
-        #print(V[40][40])
+        #V mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
         
-    
         X = unmix_target.stft(audio_torch).detach().cpu().numpy()
-        #print(X.shape)
+
         # convert to complex numpy type
         X = X[..., 0] + X[..., 1]*1j
-        #print(X.shape)
         X = X[0].transpose(2, 1, 0)
-        #print("Final shape X:",X.shape) # shape (nb_frames, nb_bins, 2). Complex numbers
+        # X shape (nb_frames, nb_bins, 2). Complex numbers
     
     estimates = {}
     
-    """
+    
     if modelname == 'open-unmix':
         if residual_model or len(targets) == 1:
             V = norbert.residual_model(V, X, alpha if softmask else 1)
@@ -191,8 +198,7 @@ def separate(
         
         Y = norbert.wiener(V, X.astype(np.complex128), niter,
                         use_softmask=softmask)
-        #print("Final Y:",Y.shape) # shape (nb_frames, nb_bins, 2, nb_targets), complex
-        #print(Y[40][40])
+        # Y shape (nb_frames, nb_bins, 2, nb_targets), complex
         
         for j, name in enumerate(source_names):
             audio_hat = istft(
@@ -201,8 +207,8 @@ def separate(
                 n_hopsize=unmix_target.stft.n_hop
             )
             estimates[name] = audio_hat.T
-    """
-    if modelname == 'deep-u-net' or modelname == "open-unmix": # without wiener filtering
+    
+    if modelname == 'deep-u-net': # without wiener filtering
         phase_audio = np.angle(X)[...,np.newaxis]
         Y = phase_audio * V
         
@@ -218,7 +224,6 @@ def separate(
         for j, name in enumerate(source_names):
             estimates[name] = V[j]
     
-    print("taille:",estimates['vocals'].shape)
     return estimates
 
 
@@ -294,9 +299,7 @@ def test_main(
             start=start,
             stop=stop
         ) # audio is a numpy array with size (nb_timesteps, nb_channels)
-        #print(audio.shape)
 
-        #print(type(audio))
         if audio.shape[1] > 2:
             warnings.warn(
                 'Channel count > 2! '
@@ -309,7 +312,6 @@ def test_main(
 
         if audio.shape[1] == 1:
             # if we have mono, let's duplicate it
-            # as the input of OpenUnmix is always stereo
             audio = np.repeat(audio, 2, axis=1)
 
         estimates = separate(
@@ -322,13 +324,6 @@ def test_main(
             residual_model=residual_model,
             device=device
         ) # is a dictionary
-        
-        
-        #print(estimates['vocals'].shape)
-        # returns a numpy array of shape (nb_timesteps, nb_channels).
-        # estimates has 4 keys being 'vocals', 'drums', 'bass', 'other'.
-        
-        #print(estimates.items())
         
         # Set in which folder the results should be put
         if not outdir:
@@ -421,5 +416,3 @@ if __name__ == '__main__':
         residual_model=args.residual_model, model=args.model,
         targets=args.targets, outdir=args.outdir, start=args.start,
         duration=args.duration, no_cuda=args.no_cuda)
-
-#summary(unmix, (1,300000))
