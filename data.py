@@ -190,6 +190,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         audio_sources = []
         target_ind = None
+        if self.modelname == 'convtasnet': non_target_inds = []
 
         # select track
         track = self.mus.tracks[index // self.samples_per_track]
@@ -200,6 +201,8 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 # memorize index of target source
                 if source == self.target:
                     target_ind = k
+                else:
+                    if self.modelname == 'convtasnet': non_target_inds.append(k)
                 
                 # select a random track if data augmentation
                 if self.random_track_mix and self.data_augmentation == 'yes':
@@ -231,22 +234,23 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 
                 if self.nb_channels == 1: # select randomly left or right channel
                     channel_number = random.randint(0, 1) 
-                    audio_sources.append(torch.unsqueeze(audio[channel_number],0))
-                if self.nb_channels == 2: # use both channels
-                    audio_sources.append(audio)
+                    audio = torch.unsqueeze(audio[channel_number],0)
+                
+                audio_sources.append(audio)
                     
-            # create stem tensor of shape (source, channel, samples)
+            # create stem tensor of shape (nb_sources=4, nb_channels, samples)
             stems = torch.stack(audio_sources, dim=0)
-            # # apply linear mix over source index=0
+            # apply linear mix over source index=0
             x = stems.sum(0)
             # get the target stem
             if target_ind is not None:
                 y = stems[target_ind]
-            # assuming vocal/accompaniment scenario if target!=source
             else:
-                vocind = list(self.mus.setup['sources'].keys()).index('vocals')
-                # apply time domain subtraction
-                y = x - stems[vocind]
+                raise ValueError("Target has not been given.")
+            
+            if self.modelname == 'convtasnet':
+                y_accompaniment = x - y
+                y = torch.stack((y,y_accompaniment),dim=0)
 
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
@@ -266,6 +270,10 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 x = torch.unsqueeze(x[channel_number],0)
                 y = torch.unsqueeze(y[channel_number],0)
             # if nb_channels = 2, use both channels
+            
+            if self.modelname == 'convtasnet':
+                y_accompaniment = x - y
+                y = torch.stack((y,y_accompaniment),dim=0)
 
         return x, y
 

@@ -209,7 +209,7 @@ class ConvTasNet(nn.Module):
         x = self.decoder(x) # output [nb_samples * C, nb_channels, nb_timesteps_ideal]
         x = x.view(nb_samples,self.C,self.nb_channels,-1) # output [nb_samples, C, nb_channels, nb_timesteps_ideal]
         
-        # output padding [nb_samples, nb_channels, nb_timesteps]
+        # output padding [nb_samples, C, nb_channels, nb_timesteps]
         x = x[:,:,:,padding_size//2:-(padding_size - padding_size//2)]  
         return x
 

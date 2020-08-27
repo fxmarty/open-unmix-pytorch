@@ -95,10 +95,14 @@ if __name__ == '__main__':
         )
         if args.outdir:
             mus.save_estimates(estimates, track, args.outdir)
-    
+        
+        # Note that museval module by default deals with stereo tracks just by taking
+        # the mean of it (see _bss_crit function in metrics.py of the module)
         scores = museval.eval_mus_track(
             track, estimates, output_dir=args.evaldir
-        )
+        ) 
+        
+        print(scores)
         
         results.add_track(scores)
 

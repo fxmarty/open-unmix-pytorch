@@ -58,8 +58,9 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
             Y = unmix.transform(y)
-            #MIX = unmix.transform(x)
             """
+            MIX = unmix.transform(x)
+            
             if epoch_num % 2 == 0 and i <=5 and model_name_general == 'deep-u-net':
                 Y_np = np.array(Y.detach().cpu())
                 Y_hat_np = np.array(Y_hat.detach().cpu())
@@ -146,7 +147,10 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
                 torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'target.wav', y[0][0].detach().cpu(), unmix.sp_rate)
                 torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'mixture.wav', x[0][0].detach().cpu(), unmix.sp_rate)
             """
-            loss = sisdr(y_hat,y)
+            loss = 0
+            for j in range(y.shape[1]): # add up SI-SNR for the different estimates
+                loss = loss + sisdr(y_hat[:,j,...],y[:,j,...])
+                
             torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
             losses.update(loss.item(), x.size(0))
            
@@ -465,7 +469,8 @@ def main():
         unmix = convtasnet.ConvTasNet(
             normalization_style=args.normalization_style,
             sample_rate=train_dataset.sample_rate,
-            nb_channels=args.nb_channels
+            nb_channels=args.nb_channels,
+            C=2 # one for the target, one for the rest
         ).to(device)
         
     
