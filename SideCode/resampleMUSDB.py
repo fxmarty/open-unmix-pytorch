@@ -12,6 +12,6 @@ for dir_, _, files in os.walk(root_dir):
         rel_file = os.path.join(rel_dir, file_name)
         if rel_file.endswith('.wav'):
             print("Processing",rel_file,"... (",100 * i/tot,"% done)")
-            y, sr = librosa.load(root_dir + rel_file, sr=8192,mono=False)
-            sf.write('/tsi/doctorants/fmarty/MUSDB18_8192wav/'+rel_file, y.T, sr)
+            y, sr = librosa.load(root_dir + rel_file, sr=16000,mono=False)
+            sf.write('/tsi/doctorants/fmarty/MUSDB18_16000wav/'+rel_file, y.T, sr)
             i = i + 1

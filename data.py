@@ -174,7 +174,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
             self.sample_rate = self.mus.tracks[0].rate
         
         else:
-            self.sample_rate = 44100 # to modify manually for minimal tests
+            self.sample_rate = 8192 # to modify manually for minimal tests
         
         self.dtype = dtype
         

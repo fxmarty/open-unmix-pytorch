@@ -7,6 +7,7 @@ import museval
 
 import data
 import utils
+import copy
 
 import torch
 import torch.nn as nn
@@ -24,6 +25,8 @@ from git import Repo
 import os
 import copy
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.summary import hparams
+
 from datetime import datetime
 import sys
 import normalization
@@ -34,6 +37,23 @@ import tf_transforms
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+
+
+# Overright SummaryWriter so that hparams is in the same subfolder as the rest
+class SummaryWriter(SummaryWriter):
+    def add_hparams(self, hparam_dict, metric_dict):
+        torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
+        if type(hparam_dict) is not dict or type(metric_dict) is not dict:
+            raise TypeError('hparam_dict and metric_dict should be dictionary.')
+        exp, ssi, sei = hparams(hparam_dict, metric_dict)
+
+        #logdir = self._get_file_writer().get_logdir()
+
+        self.file_writer.add_summary(exp)
+        self.file_writer.add_summary(ssi)
+        self.file_writer.add_summary(sei)
+        for k, v in metric_dict.items():
+            self.add_scalar(k, v)
 
 tqdm.monitor_interval = 0
 batch_seen = 0
@@ -58,10 +78,10 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
             Y = unmix.transform(y)
-            """
+            
             MIX = unmix.transform(x)
             
-            if epoch_num % 2 == 0 and i <=5 and model_name_general == 'deep-u-net':
+            if epoch_num % 30 == 0 and i <=5 and model_name_general == 'deep-u-net':
                 Y_np = np.array(Y.detach().cpu())
                 Y_hat_np = np.array(Y_hat.detach().cpu())
                 MIX_np = np.array(MIX.detach().cpu())
@@ -122,7 +142,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
                 
                 plt.close("all")
                 plt.clf()
-            """
+            
             if model_name_general == 'open-unmix':
                 loss = torch.nn.functional.mse_loss(Y_hat, Y)
             
@@ -133,18 +153,18 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         
         if model_name_general == 'convtasnet':
             y_hat = unmix(x)
-            """
+            
             #print("museval scores:",museval.evaluate(y[0].detach().cpu(),y_hat[0].detach().cpu(),win=132300,mode='v3')[0])
             #print("SI-SDR scores:",sisdr(y_hat,y))
-                        
-            if epoch_num % 2 == 0:
+            """
+            if epoch_num % 10 == 0:
                 #cpuu = torch.device("cpu")
                 #print(y_hat[0].detach().cpu())
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'estimate.wav', y_hat[0][0].detach().cpu(), unmix.sp_rate)
+                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'estimate.wav', y_hat[0][0][0].detach().cpu(), unmix.sp_rate)
                 
             if epoch_num == 1:
                 #cpuu = torch.device("cpu")
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'target.wav', y[0][0].detach().cpu(), unmix.sp_rate)
+                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'target.wav', y[0][0][0].detach().cpu(), unmix.sp_rate)
                 torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'mixture.wav', x[0][0].detach().cpu(), unmix.sp_rate)
             """
             loss = 0
@@ -398,10 +418,11 @@ def main():
     print("len(train_dataset[0]):",len(train_dataset[0]))
     print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
     print("---")
+    """
     print("len(valid_dataset):",len(valid_dataset))
     print("len(valid_dataset[0]):",len(valid_dataset[0]))
     print("valid_dataset[0][0].shape:",valid_dataset[0][0].shape)
-    
+    """
     train_sampler = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
         **dataloader_kwargs
@@ -466,6 +487,8 @@ def main():
         ).to(device)
     
     elif args.modelname == 'convtasnet':
+        if args.nb_channels == 2:
+            raise ValueError("You should not train ConvTasNet with stereo signals.")
         unmix = convtasnet.ConvTasNet(
             normalization_style=args.normalization_style,
             sample_rate=train_dataset.sample_rate,
@@ -497,9 +520,25 @@ def main():
         currentHour = datetime.now().strftime('_%H:%M_')
         global writerTrainLoss
         global writerValidationLoss
-        writerTrainLoss = SummaryWriter(log_dir="runs/" + currentDay + args.tb + currentHour + "train")
-        writerValidationLoss = SummaryWriter(log_dir="runs/" + currentDay + args.tb + currentHour + "validation")
-    
+        trainDirName = "runs-"+args.modelname+"/" + currentDay + args.tb + currentHour + "train"
+        validDirName = "runs-"+args.modelname+"/" + currentDay + args.tb + currentHour + "validation"
+        
+        writerTrainLoss = SummaryWriter(log_dir=trainDirName)
+        writerValidationLoss = SummaryWriter(log_dir=validDirName)
+        
+        argsCopyDict = vars(copy.deepcopy(args))
+        del argsCopyDict['dataset']
+        del argsCopyDict['output']
+        del argsCopyDict['model']
+        del argsCopyDict['seed']
+        del argsCopyDict['unidirectional']
+        del argsCopyDict['nb_workers']
+        del argsCopyDict['quiet']
+        del argsCopyDict['no_cuda']
+        del argsCopyDict['is_wav']
+        del argsCopyDict['source_augmentations']
+        writerTrainLoss.add_hparams(argsCopyDict,{'hparam/losss': 1})
+                
     #memory_check("Memory before starting the training:")
     
     # if a model is specified: resume training
@@ -554,6 +593,8 @@ def main():
         if args.tb is not None:
             writerTrainLoss.add_scalar('Loss', train_loss,epoch)
             writerValidationLoss.add_scalar('Loss', valid_loss,epoch)
+            writerTrainLoss.flush()
+            writerValidationLoss.flush()
             
         t.set_postfix(
             train_loss=train_loss, val_loss=valid_loss
@@ -599,7 +640,7 @@ def main():
             print("Apply Early Stopping")
             break
         
-        
+    
     if args.tb is not None:
         writerTrainLoss.close()
         writerValidationLoss.close()

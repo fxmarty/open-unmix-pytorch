@@ -141,8 +141,8 @@ def separate(
 
     """
     # convert numpy audio to torch
-    audio_torch = torch.tensor(audio.T[None, ...]).float().to(device)
-    # audio_torch shape [1,2,nb_time_points]
+    mixture = torch.tensor(audio.T[None, ...]).float().to(device)
+    # mixture shape [1,2,nb_time_points]
 
     source_names = []
     V = []
@@ -156,7 +156,7 @@ def separate(
         
         # If the model takes mono as input, put the channels in the number of samples dim
         if nb_channels_model == 1: 
-            mixture = audio_torch.view(2,1,-1) # [2,1,nb_time_points]
+            mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
         
         Vj = unmix_target(mixture).cpu().detach().numpy()
         
@@ -180,7 +180,7 @@ def separate(
         V = np.transpose(np.array(V), (1, 3, 2, 0))
         #V mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
         
-        X = unmix_target.stft(audio_torch).detach().cpu().numpy()
+        X = unmix_target.stft(mixture).detach().cpu().numpy()
 
         # convert to complex numpy type
         X = X[..., 0] + X[..., 1]*1j

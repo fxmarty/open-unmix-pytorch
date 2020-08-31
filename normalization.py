@@ -41,8 +41,18 @@ class Normalize(nn.Module):
             x *= self.input_scale
         
         if self.normalization_style == 'batch-specific':
-            xmax = torch.max(x)
-            xmin = torch.min(x)
+            if len(x.shape) == 3:
+                xmax = torch.max(x,dim=2)
+                xmin = torch.min(x,dim=2)
+                xmax = xmax[:,:,None]
+                xmin = xmin[:,:,None]
+
+            if len(x.shape) == 4:
+                xmax,xmax_ind = torch.max(x.view(x.shape[0],x.shape[1],-1),dim=2)
+                xmin,xmin_ind = torch.min(x.view(x.shape[0],x.shape[1],-1),dim=2)
+                xmax = xmax[:,:,None,None]
+                xmin = xmin[:,:,None,None]
+            
             x = (x - xmin)/(xmax-xmin)
         
         if self.normalization_style == 'none':

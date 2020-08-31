@@ -65,12 +65,12 @@ class ConvTasNet(nn.Module):
         nb_channels=2,
         sample_rate=44100,
         N=512,
-        L=20, # Originally 16, but 20 for 44100 Hz
+        L=16, # Originally 16, but 20 for 44100 Hz
         B=128,
         H=512,
         Sc=128,
         P=3,
-        X=10, # Originally 8, but 10 for same receptive field at for 44100 Hz
+        X=9, # Originally 8, but 10 for same receptive field at for 44100 Hz, 9 for 16000 Hz
         R=3,
         C=1 # We usually only extract one source
     ):
@@ -104,7 +104,6 @@ class ConvTasNet(nn.Module):
         self.C = C
         self.N = N
         self.L = L
-        self.print = print
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
         self.sp_rate = sample_rate
         self.nb_channels = nb_channels

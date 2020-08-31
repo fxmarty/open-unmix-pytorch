@@ -84,6 +84,7 @@ if __name__ == '__main__':
 
     results = museval.EvalStore()
     for track in tqdm.tqdm(mus.tracks):
+        #print(track.rate)
         estimates = test.separate(
             audio=track.audio, # shape [nb_time_points, 2]
             targets=args.targets,
@@ -102,7 +103,7 @@ if __name__ == '__main__':
             track, estimates, output_dir=args.evaldir
         ) 
         
-        print(scores)
+        #print(scores)
         
         results.add_track(scores)
 

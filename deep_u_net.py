@@ -60,7 +60,7 @@ class Deep_u_net(nn.Module):
 
         super(Deep_u_net, self).__init__()
         self.stft = tf_transforms.STFT(n_fft=n_fft, n_hop=n_hop)
-        self.spec = tf_transforms.Spectrogram(power=1, mono=(nb_channels == 1))
+        self.spec = tf_transforms.Spectrogram(power=1)
         self.print = print
         
         # register sample_rate to check at inference time
