@@ -1,4 +1,4 @@
-# COMMMMENENTTT
+# COMMMMENENT
 import argparse
 import musdb
 import museval
