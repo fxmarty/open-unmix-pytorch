@@ -40,13 +40,12 @@ def deconv_block(in_chans,out_chans,dropout=True,
 class Deep_u_net(nn.Module):
     def __init__(
         self,
-        normalization_style="batch-specific",
+        normalization_style='batch-specific',
         n_fft=4096,
         n_hop=1024,
         nb_channels=2,
         input_is_spectrogram=False,
         sample_rate=44100,
-        print=False,
         input_mean=None,
         input_scale=None,
         max_bin=None
@@ -61,7 +60,6 @@ class Deep_u_net(nn.Module):
         super(Deep_u_net, self).__init__()
         self.stft = tf_transforms.STFT(n_fft=n_fft, n_hop=n_hop)
         self.spec = tf_transforms.Spectrogram(power=1)
-        self.print = print
         
         # register sample_rate to check at inference time
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
@@ -101,59 +99,41 @@ class Deep_u_net(nn.Module):
             in_chans = 16*2**i
             self.decoder.append(deconv_block(in_chans,in_chans//4,dropout=False))
         
-        self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation='relu',batchnorm=False)) # stereo output
+        self.decoder.append(deconv_block(16*2**1,nb_channels,dropout=False,activation='relu',batchnorm=False))
         
-        
-
     def forward(self, mix):
-        if self.print == True:print("original size:",mix.shape)
-        
-        # transform to spectrogram on the fly
-        x = self.transform(mix)
+        x = self.transform(mix) # transform to spectrogram on the fly
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
-        #print(nb_frames, nb_samples, nb_channels, nb_bins)
         
-        if self.print == True:print("After transform:",x.shape)
-        # reshape to the conventional shape for cnn in pytorch
+        # reshape to [nb_samples,nb_channels,nb_frames,nb_bins]
         x = torch.reshape(x,(nb_samples,nb_channels,-1,nb_bins))
+
+        x_original = x.detach().clone() # save the mixture for masking later
         
-        x_original = x.detach().clone()
-                
-        x = self.normalize_input(x)
+        x = self.normalize_input(x) # Normalize the input
         
-        x = x[...,:512] # keep 512 and not 513 frequency bins
-        
-        saved = []
+        x = x[...,:512] # keep 512 and not 513 frequency bins so as to have nice convs
+        saved = [] # Saved output of encoder convolutional layers for stacking later
         
         for encode in self.encoder:
-            if self.print == True: print("Before encoding:",x.shape)
             saved.append(x)
             x = encode(x)
             #checkValidConvolution(x.shape[-1],kernel_size=4,stride=2,padding=1,note="encoder conv block")
             #checkValidConvolution(x.shape[-2],kernel_size=4,stride=2,padding=1,note="encoder conv block")
-            if self.print == True: print("----CONVOL")
         
-        if self.print == True: print("debut decoder:",x.shape)
         for decode in self.decoder:
-            if self.print == True: print("Before decoding:",x.shape)
-
             x = decode(x)
-            if self.print == True: print("After decoding:",x.shape)
-            
-            if len(saved) > 1:
+            if len(saved) > 1: # Stack except for the first
                 y = saved.pop(-1)
-                x = torch.cat((x,y),1)
-                if self.print == True: print("After skip connection:",x.shape)
-            
-            if self.print == True: print("----DECONVOL")
-        
+                x = torch.cat((x,y),1) # stack over channel dimension
+                
         # we go back to 513 bins and mutiply the original spectrogram by our mask
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         ones = torch.ones(nb_samples,nb_channels,nb_frames,1).to(device)
         x = torch.cat((x,ones),3)
         x = x * x_original
-        x = x.permute(2,0,1,3)
-        #print("output:",x.shape)
+        
+        x = x.permute(2,0,1,3) # output [nb_frames, nb_samples, nb_channels, nb_bins]
         return x # return the magnitude spectrogram of the estimated source
 
 if __name__ == '__main__':
@@ -165,14 +145,13 @@ if __name__ == '__main__':
         nb_channels=nb_channels,
         sample_rate=8192,
         n_fft=1024,
-        n_hop=768,
-        print=True
+        n_hop=768
         ).to(device)
     
     time = 98560
     mix = (torch.rand(16, nb_channels, time)+2)**2
     mix = mix.to(device)
-    deep_u_net.forward(mix)
+    res = deep_u_net(mix) 
     
     #print(pytorch_model_summary.summary(deep_u_net, mix, show_input=False))
     

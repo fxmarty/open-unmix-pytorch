@@ -7,10 +7,8 @@ import musdb
 import torch
 import tqdm
 import librosa
-import numpy as np
 
 import random
-random.seed(42)
 
 class Compose(object):
     """Composes several augmentation transforms.
@@ -59,7 +57,7 @@ def load_datasets(parser, args):
             'subsets': 'train',
             'target': args.target,
             'download': args.root is None,
-            'seed': args.seed
+            'random_chunks': args.random_chunks
         }
 
         source_augmentations = Compose(
@@ -105,8 +103,8 @@ class MUSDBDataset(torch.utils.data.Dataset):
         source_augmentations=lambda audio: audio,
         random_track_mix=False,
         dtype=torch.float32,
-        seed=42,
         data_augmentation="yes",
+        random_chunks=True,
         nb_channels=2,
         *args, **kwargs
     ):
@@ -141,8 +139,8 @@ class MUSDBDataset(torch.utils.data.Dataset):
         random_track_mix : boolean
             randomly mixes sources from different tracks to assemble a
             custom mix. This augmenation is only applied for the train subset.
-        seed : int
-            control randomness of dataset iterations
+        random_chunks : boolean
+            boolean defining if chunks for the tracks will be choosed randomly or not
         dtype : numeric type
             data type of torch output tuple x and y
         args, kwargs : additional keyword arguments
@@ -150,7 +148,6 @@ class MUSDBDataset(torch.utils.data.Dataset):
             initialization function.
 
         """
-        random.seed(seed)
         self.modelname = modelname
         self.is_wav = is_wav
         self.seq_duration = seq_duration
@@ -161,6 +158,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.source_augmentations = source_augmentations
         self.random_track_mix = random_track_mix
         self.data_augmentation = data_augmentation
+        self.random_chunks = random_chunks
         self.nb_channels = nb_channels
         self.mus = musdb.DB(
             root=root,
@@ -170,6 +168,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
             download=download,
             *args, **kwargs
         )
+        
         if len(self.mus.tracks) > 0:
             self.sample_rate = self.mus.tracks[0].rate
         
@@ -190,6 +189,13 @@ class MUSDBDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         audio_sources = []
         target_ind = None
+        """
+        if torch.utils.data.get_worker_info() is not None:
+            print(torch.utils.data.get_worker_info())
+        print(random.random())
+        print("---")
+        """
+        # For having the 'instrumental' into the targets too
         if self.modelname == 'convtasnet': non_target_inds = []
 
         # select track
@@ -210,9 +216,9 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 
                 # set the excerpt duration
                 track.chunk_duration = self.seq_duration
-                                
+                
                 # set random start position if data augmentation
-                if self.data_augmentation == 'yes':
+                if self.random_chunks:
                     track.chunk_start = random.uniform(
                         0, track.duration - self.seq_duration)
                 else:
@@ -225,15 +231,14 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 )
                 
                 if self.modelname == 'deep-u-net':
-                    #audio = audio[...,:262144]
                     audio = audio[...,:98560] # for testing purpose, 128 frames
-                    #print(audio.shape)
                                 
                 if self.data_augmentation == 'yes':
                     audio = self.source_augmentations(audio)
                 
                 if self.nb_channels == 1: # select randomly left or right channel
-                    channel_number = random.randint(0, 1) 
+                    channel_number = 0
+                    if self.random_chunks: channel_number = random.randint(0, 1) 
                     audio = torch.unsqueeze(audio[channel_number],0)
                 
                 audio_sources.append(audio)
@@ -264,16 +269,17 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 track.targets[self.target].audio.T,
                 dtype=self.dtype
             )
-            
-            if self.nb_channels == 1: # select randomly left or right channel
-                channel_number = random.randint(0, 1) 
-                x = torch.unsqueeze(x[channel_number],0)
-                y = torch.unsqueeze(y[channel_number],0)
+            if self.nb_channels == 1: # select left or right depending on index even or not
+                x = torch.unsqueeze(x[index%2],0)
+                y = torch.unsqueeze(y[index%2],0)
             # if nb_channels = 2, use both channels
             
             if self.modelname == 'convtasnet':
                 y_accompaniment = x - y
                 y = torch.stack((y,y_accompaniment),dim=0)
+            
+            #x = x[...,:x.shape[-1]//2]
+            #y = y[...,:y.shape[-1]//2]
 
         return x, y
 

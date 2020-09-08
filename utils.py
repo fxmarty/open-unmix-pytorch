@@ -5,7 +5,7 @@ import numpy as np
 import math
 
 def memory_check(comment):
-    print(comment,torch.cuda.memory_allocated(0)*1e-9, "GB out of",torch.cuda.get_device_properties(0).total_memory*1e-9, "GB used.")
+    print(comment,torch.cuda.memory_reserved(0)*1e-9, "GB out of",torch.cuda.get_device_properties(0).total_memory*1e-9, "GB used.")
 
 # Returns true if no time steps left over in a Conv1d.
 def checkValidConvolution(input_size,kernel_size,stride=1,padding=0,dilation=1,note=""):
@@ -18,7 +18,8 @@ def valid_length(input_size,kernel_size,stride=1,padding=0,dilation=1):
     there is no time steps left over in a a 1dConv, e.g. for all
     layers, size of the (input - kernel_size) % stride = 0.
     """
-    length = math.ceil((input_size + 2*padding - dilation * (kernel_size - 1) - 1)/stride) + 1
+    #length = math.ceil((input_size + 2*padding - dilation * (kernel_size - 1) - 1)/stride) + 1
+    length = math.ceil(torch.true_divide(input_size + 2*padding - dilation * (kernel_size - 1) - 1,stride).item()) + 1
     length = (length - 1) * stride - 2*padding + dilation * (kernel_size - 1) + 1
 
     return int(length)
@@ -211,3 +212,14 @@ class EarlyStopping(object):
             self.is_better = lambda a, best: a < best - min_delta
         if mode == 'max':
             self.is_better = lambda a, best: a > best + min_delta
+"""
+###
+import torch
+xx = torch.rand((1),requires_grad = True)
+yy = 3*xx
+zz = yy**2
+zz.backward()
+xx.grad # This is ok
+yy.grad # This gives 0! 
+zz.grad # This should give 1!
+"""

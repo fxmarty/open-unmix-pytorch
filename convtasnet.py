@@ -8,6 +8,7 @@ from utils import checkValidConvolution, valid_length, memory_check
 
 import normalization
 
+import torchsnooper
 # The temporal block preserves the length of the signal received as input
 class TemporalBlock(nn.Module):
     def __init__(self,
@@ -17,13 +18,16 @@ class TemporalBlock(nn.Module):
                  kernel_size,
                  stride,
                  padding,
-                 dilation):
+                 dilation,
+                 end_block): # end block for having only skip at the end
         super(TemporalBlock, self).__init__()
 
         self.kernel_size = kernel_size
+        self.end_block = end_block
+        
         self.stride,self.padding,self.dilation = stride,padding,dilation
         
-        self.conv1x1 = nn.Conv1d(in_channels, hidden_channels, kernel_size=1, bias=False)
+        self.conv1x1 = nn.Conv1d(in_channels, hidden_channels, kernel_size=1)
         
         self.nonlinearity1 = nn.PReLU()
         
@@ -35,15 +39,17 @@ class TemporalBlock(nn.Module):
                                    stride=stride,
                                    padding=padding,
                                    dilation=dilation,
-                                   groups=in_channels,
-                                   bias=False)
+                                   groups=in_channels
+                                   )
         
         self.nonlinearity2 = nn.PReLU()
         
         self.norm2 = nn.GroupNorm(1, hidden_channels, eps=1e-08)
         
         self.skip_out = nn.Conv1d(hidden_channels, sc_channels, kernel_size=1)
-        self.res_out = nn.Conv1d(hidden_channels, in_channels, kernel_size=1)
+        
+        if end_block == False:
+            self.res_out = nn.Conv1d(hidden_channels, in_channels, kernel_size=1)
 
 
     def forward(self, input):
@@ -53,9 +59,14 @@ class TemporalBlock(nn.Module):
         output = self.norm2(self.nonlinearity2(self.depthwise_conv(output)))
         
         #checkValidConvolution(output.size(2),self.kernel_size)
-        residual = self.res_out(output)
+        
         skip = self.skip_out(output)
-        return residual, skip
+        
+        if self.end_block == False:
+            residual = self.res_out(output)
+            return residual, skip
+        else:
+            return skip
 
 
 class ConvTasNet(nn.Module):
@@ -64,14 +75,14 @@ class ConvTasNet(nn.Module):
         normalization_style='none',
         nb_channels=2,
         sample_rate=44100,
-        N=512,
+        N=128, # Originally 512
         L=16, # Originally 16, but 20 for 44100 Hz
         B=128,
-        H=512,
+        H=256, # Originally 512
         Sc=128,
         P=3,
-        X=9, # Originally 8, but 10 for same receptive field at for 44100 Hz, 9 for 16000 Hz
-        R=3,
+        X=8, # Originally 8 ; 10 for same receptive field at 44100 Hz, 9 for 16000 Hz
+        R=2, # Originally 3
         C=1 # We usually only extract one source
     ):
         """
@@ -104,6 +115,8 @@ class ConvTasNet(nn.Module):
         self.C = C
         self.N = N
         self.L = L
+        self.X = X
+        self.R = R
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
         self.sp_rate = sample_rate
         self.nb_channels = nb_channels
@@ -112,13 +125,13 @@ class ConvTasNet(nn.Module):
         
         # Encoder part
         self.encoder = nn.Sequential(
-                            nn.Conv1d(nb_channels,N,kernel_size=L,stride=L // 2),
+                            nn.Conv1d(nb_channels,N,kernel_size=L,stride=L // 2,bias=False),
                             nn.ReLU()
                         )
         
         # Separation part
         self.layerNorm = nn.GroupNorm(1, N, eps=1e-8)
-        self.bottleneck_conv1x1 = nn.Conv1d(N, B, 1, bias=False)
+        self.bottleneck_conv1x1 = nn.Conv1d(N, B, 1)
         
         self.repeats = nn.ModuleList()
         
@@ -134,21 +147,19 @@ class ConvTasNet(nn.Module):
                                             kernel_size=P,
                                             stride=1,
                                             padding=padding,
-                                            dilation=dilation)
+                                            dilation=dilation,
+                                            end_block=(r == R - 1 and x == X - 1))
                             )
             self.repeats.append(repeat)
                 
         self.output = nn.Sequential(nn.PReLU(),
-                                    nn.Conv1d(Sc, C * N, 1),
+                                    nn.Conv1d(Sc, C * N, kernel_size=1),
                                     nn.Sigmoid()
                                    )
         # Decoder part
         self.decoder = nn.ConvTranspose1d(N, nb_channels, kernel_size=L,stride=L // 2, bias=False)
             
-    def pad_signal(self,input):
-        use_cuda = torch.cuda.is_available() #overrides no-cuda parameter. Take care!
-        device = torch.device("cuda" if use_cuda else "cpu")
-        
+    def pad_signal(self,input):        
         # input is the waveforms: (batch_size,nb_channels,T)
         batch_size = input.size(0)
         nb_channels = input.size(1)
@@ -158,11 +169,12 @@ class ConvTasNet(nn.Module):
         ideal_size = valid_length(nsample+2*self.L//2,self.L,stride=self.L//2)
         padding_size = ideal_size - nsample 
         
-        pad_aux_left = torch.zeros(batch_size,nb_channels,padding_size//2).to(device)
-        pad_aux_right = torch.zeros(batch_size,nb_channels,padding_size - padding_size//2).to(device)
+        pad_aux_left = torch.zeros(batch_size,nb_channels,padding_size//2).to(input.device)
+        pad_aux_right = torch.zeros(batch_size,nb_channels,padding_size - padding_size//2).to(input.device)
         outut = torch.cat([pad_aux_left, input, pad_aux_right], 2)
         return outut, padding_size
-
+    
+    
     def forward(self, x):
         nb_samples = x.shape[0]
 
@@ -175,28 +187,33 @@ class ConvTasNet(nn.Module):
         # Encoder
         #checkValidConvolution(x.size(2),kernel_size=self.L,stride=self.L // 2,note="encoder")
         x = self.encoder(x) # output [nb_samples, N, hidden_size]
-        mix_encoded = x.detach().clone()
+        mix_encoded = x.clone()
         
         # Separation
         x = self.layerNorm(x) # output [nb_samples, N, hidden_size]
         
         #checkValidConvolution(x.size(2),kernel_size=1)
-        output = self.bottleneck_conv1x1(x) #output [nb_samples, B, hidden_size]
-        skip_connection = 0.
+        x = self.bottleneck_conv1x1(x) #output [nb_samples, B, hidden_size]
+        #print("xshape:",x.shape)
         
-        i = 0
+        #skip_connection = torch.zeros(x.shape,requires_grad=x.requires_grad).to(x.device)
+        skip_connection = 0.
+        i = 1
         for repeat in self.repeats:
             for temporalBlock in repeat:
                 # residual [nb_samples, Sc, hidden_size]
                 # skip [nb_samples, B, hidden_size]
-                residual, skip = temporalBlock(output) 
-                skip_connection = skip_connection + skip
-                output = output + residual
+                if i < self.R*self.X:
+                    residual, skip = temporalBlock(x)
+                    skip_connection = skip_connection + skip
+                    x = x + residual
+                else:
+                    skip = temporalBlock(x)
+                    skip_connection = skip_connection + skip
                 i=i+1
             
-        #checkValidConvolution(skip_connection.size(2),kernel_size=1)
         x = self.output(skip_connection) # output [nb_samples, C*N, hidden_size]
-
+        
         # output [nb_samples, C, N, hidden_size]
         masks = x.view(-1, self.C, self.N, x.shape[-1]) 
         
@@ -214,7 +231,9 @@ class ConvTasNet(nn.Module):
 
 if __name__ == '__main__':
     import numpy as np
-    
+    from torchviz import make_dot
+    import hiddenlayer as hl
+    #import IPython
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = ConvTasNet(nb_channels=1,C=2).to(device)
     model.eval()
@@ -225,6 +244,14 @@ if __name__ == '__main__':
     mix = mix.to(device)
     #with torch.no_grad():
     res = model(mix)   
+    #make_dot(res,params=model.named_parameters()).render("attached", format="png")
+    make_dot(res,params={**{'inputs': mix}, **dict(model.named_parameters())}).render("attached", format="png")
+    """
+    im = hl.build_graph(model, mix)
+    dot=im.build_dot()
+    dot.format="png"
+    im=dot.render("attached_hl",cleanup=True)
+    """
     #model.pad_signal(mix)
     #print(torch.cuda.max_memory_allocated(0)/1e9)
     

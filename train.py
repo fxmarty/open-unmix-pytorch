@@ -31,12 +31,16 @@ from datetime import datetime
 import sys
 import normalization
 
-from loss_SI_SDR import sisdr
+from loss_SI_SDR import sisdr_framewise
 from utils import memory_check
 import tf_transforms
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+from matplotlib.lines import Line2D
+
+import torchsnooper
+import time
 
 
 # Overright SummaryWriter so that hparams is in the same subfolder as the rest
@@ -55,9 +59,36 @@ class SummaryWriter(SummaryWriter):
         for k, v in metric_dict.items():
             self.add_scalar(k, v)
 
+def plot_grad_flow(named_parameters,i):
+    ave_grads = []
+    layers = []
+    for n, p in named_parameters:
+        if(p.requires_grad) and ("bias" not in n):
+            layers.append(n)
+            ave_grads.append(p.grad.abs().mean())
+    fig, ax = plt.subplots()
+    plt.plot(ave_grads, color="blue",linewidth=0.7)
+    plt.hlines(0, 0, len(ave_grads)+1, linewidth=0.5, color="blue" )
+    #plt.rcParams['xtick.labelsize']=4
+    plt.xticks(range(0,len(ave_grads), 1), layers,rotation="vertical",fontsize=3)
+    #plt.rcParams['xtick.labelsize']=4
+    plt.xlim(xmin=0, xmax=len(ave_grads))
+    """
+    for xc in range(len(ave_grads)):
+        plt.axvline(x=xc)
+    """
+    plt.xlabel("Layers")
+    plt.ylabel("average gradient")
+    plt.title("Gradient flow")
+    plt.grid(True)
+    plt.savefig('TESTGRAD'+str(i)+'.png',dpi=600,bbox_inches='tight',pad_inches=0.7)
+    plt.close("all")
+    plt.clf()
+
 tqdm.monitor_interval = 0
 batch_seen = 0
 
+#@torchsnooper.snoop()
 def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch_num,tb="no"):
     losses = utils.AverageMeter()
     unmix.train()
@@ -66,19 +97,16 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
     i = 0
     # Loop by number of tracks * number of samples per track / batch size
     for x, y in pbar:
-        torch.autograd.set_detect_anomaly(True)
-
         pbar.set_description("Training batch")
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
         
         sys.stdout.write("\rBatch number %i" % i)
         sys.stdout.flush()
-        
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
             Y = unmix.transform(y)
-            
+            """
             MIX = unmix.transform(x)
             
             if epoch_num % 30 == 0 and i <=5 and model_name_general == 'deep-u-net':
@@ -142,7 +170,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
                 
                 plt.close("all")
                 plt.clf()
-            
+            """
             if model_name_general == 'open-unmix':
                 loss = torch.nn.functional.mse_loss(Y_hat, Y)
             
@@ -153,9 +181,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         
         if model_name_general == 'convtasnet':
             y_hat = unmix(x)
-            
-            #print("museval scores:",museval.evaluate(y[0].detach().cpu(),y_hat[0].detach().cpu(),win=132300,mode='v3')[0])
-            #print("SI-SDR scores:",sisdr(y_hat,y))
+
             """
             if epoch_num % 10 == 0:
                 #cpuu = torch.device("cpu")
@@ -169,21 +195,45 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
             """
             loss = 0
             for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                loss = loss + sisdr(y_hat[:,j,...],y[:,j,...])
+                loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],unmix.sp_rate)
                 
             torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
             losses.update(loss.item(), x.size(0))
-           
+        
         i = i + 1
         loss.backward()
-        optimizer.step()
         
+        #plot_grad_flow(unmix.named_parameters(),i)
+        """
+        for name, param in unmix.named_parameters():
+            print(name,param.size(),"---",param.requires_grad)
+            try:
+                print(param.grad.abs().mean())
+                print("Shape gradient:",param.grad.shape)
+            except:
+                print("----------------NONETYPE ERROR")
+            
+            if name == 'repeats.1.7.res_out.bias':
+                print(param.grad)
+        """
+        optimizer.step()
+        try:
+            del y_hat
+        except: 
+            pass
+        try:
+            del Y_hat
+        except: 
+            pass
+        del x
+        del y
+        torch.cuda.empty_cache()
         """
         if tb is not None:
             batch_seen = batch_seen + 1 
             writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
         """
-                        
+    
     return losses.avg
 
 
@@ -216,8 +266,21 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
             
             if model_name_general == 'convtasnet':
                 y_hat = unmix(x)
-                loss = sisdr(y_hat,y)
+                loss = 0
+                for j in range(y.shape[1]): # add up SI-SNR for the different estimates
+                    loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],unmix.sp_rate)
                 losses.update(loss.item(), x.size(0))
+            try:
+                del y_hat
+            except: 
+                pass
+            try:
+                del Y_hat
+            except: 
+                pass
+            del x
+            del y
+            torch.cuda.empty_cache()
         """
         if tb is not None:
             print("Valid:",losses.avg)
@@ -259,8 +322,8 @@ def get_statistics(args, dataset):
 
 
 def main():
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    #torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
     
     parser = argparse.ArgumentParser(description='Open Unmix Trainer')
 
@@ -345,11 +408,11 @@ def main():
     
     parser.add_argument('--tb', default=None,
                         help='use tensorboard, and if so, set name')
-    """
-    parser.add_argument('--verbose',
+    
+    parser.add_argument('--random-chunks',
                         action='store_true',
-                        help='Print details during training process')
-    """
+                        help='Choose if the start point of a chunk is choosed randomly or not in data.py')
+    
     args, _ = parser.parse_known_args()
     
     # Make normalization-style argument not mendatory
@@ -362,20 +425,25 @@ def main():
     if args.normalization_style == None and args.modelname == 'convtasnet':
         parser.set_defaults(normalization_style='none')
     
+    if args.data_augmentation == 'yes' and args.random_chunks == False:
+        parser.set_defaults(random_chunks=True)
+    
     # Update args according to the two conditions above
     args, _ = parser.parse_known_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     print("Using GPU:", use_cuda)
     print("Using Torchaudio: ", utils._torchaudio_available())
+    
     dataloader_kwargs = {'num_workers': args.nb_workers, 'pin_memory': True} if use_cuda else {}
 
     repo_dir = os.path.abspath(os.path.dirname(__file__))
     repo = Repo(repo_dir)
     commit = repo.head.commit.hexsha[:7]
 
-    # use jpg or npy
     torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
+    np.random.seed(args.seed)
 
     device = torch.device("cuda" if use_cuda else "cpu")
     
@@ -423,13 +491,22 @@ def main():
     print("len(valid_dataset[0]):",len(valid_dataset[0]))
     print("valid_dataset[0][0].shape:",valid_dataset[0][0].shape)
     """
+    
+    def _init_fn(worker_id):
+        torch.manual_seed(args.seed + worker_id) 
+        torch.cuda.manual_seed(args.seed + worker_id)
+        random.seed(args.seed + worker_id)
+        np.random.seed(args.seed + worker_id)
+    
     train_sampler = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
+        worker_init_fn=_init_fn,
         **dataloader_kwargs
     )
 
     valid_sampler = torch.utils.data.DataLoader(
         valid_dataset, batch_size=1,
+        worker_init_fn=_init_fn,
         **dataloader_kwargs
     )
     
@@ -575,6 +652,7 @@ def main():
         best_epoch = 0
 
     for epoch in t:
+        #memory_check("At the start of epoch "+str(epoch)+":")
         t.set_description("Training Epoch")
         end = time.time()
         
@@ -582,10 +660,10 @@ def main():
             print(param_group['lr'])
 
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
-        
-        #memory_check("After batches from epoch"+str(epoch)+":")
-        
+                
+        #memory_check("Just before validation (epoch "+str(epoch)+"):")
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
+        #memory_check("Just after validation (epoch "+str(epoch)+"):")
         scheduler.step(valid_loss)
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)
@@ -639,6 +717,8 @@ def main():
         if stop:
             print("Apply Early Stopping")
             break
+        
+        #memory_check("Just at the end of epoch "+str(epoch)+"):")
         
     
     if args.tb is not None:
