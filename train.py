@@ -3,7 +3,6 @@ import argparse
 import model
 import deep_u_net
 import convtasnet
-import museval
 
 import data
 import utils
@@ -580,15 +579,19 @@ def main():
         weight_decay=args.weight_decay
     )
     
-    #optimizer = torch.optim.SGD(unmix.parameters(), lr=args.lr, momentum=0.5)
-
+    
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         factor=args.lr_decay_gamma,
         patience=args.lr_decay_patience,
         cooldown=10
     )
-
+    
+    """
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+            gamma=args.lr_decay_gamma,
+            milestones=[i*args.lr_decay_patience for i in range(1,int(args.epochs/args.lr_decay_patience))])
+    """
     es = utils.EarlyStopping(patience=args.patience)
     
     # Use tensorboard if specified as an argument
@@ -652,7 +655,6 @@ def main():
         best_epoch = 0
 
     for epoch in t:
-        #memory_check("At the start of epoch "+str(epoch)+":")
         t.set_description("Training Epoch")
         end = time.time()
         
@@ -661,9 +663,10 @@ def main():
 
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
                 
-        #memory_check("Just before validation (epoch "+str(epoch)+"):")
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
-        #memory_check("Just after validation (epoch "+str(epoch)+"):")
+        
+        
+        #scheduler.step()
         scheduler.step(valid_loss)
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)
@@ -717,9 +720,6 @@ def main():
         if stop:
             print("Apply Early Stopping")
             break
-        
-        #memory_check("Just at the end of epoch "+str(epoch)+"):")
-        
     
     if args.tb is not None:
         writerTrainLoss.close()

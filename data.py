@@ -195,8 +195,6 @@ class MUSDBDataset(torch.utils.data.Dataset):
         print(random.random())
         print("---")
         """
-        # For having the 'instrumental' into the targets too
-        if self.modelname == 'convtasnet': non_target_inds = []
 
         # select track
         track = self.mus.tracks[index // self.samples_per_track]
@@ -207,8 +205,6 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 # memorize index of target source
                 if source == self.target:
                     target_ind = k
-                else:
-                    if self.modelname == 'convtasnet': non_target_inds.append(k)
                 
                 # select a random track if data augmentation
                 if self.random_track_mix and self.data_augmentation == 'yes':

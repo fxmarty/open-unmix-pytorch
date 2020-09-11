@@ -212,14 +212,3 @@ class EarlyStopping(object):
             self.is_better = lambda a, best: a < best - min_delta
         if mode == 'max':
             self.is_better = lambda a, best: a > best + min_delta
-"""
-###
-import torch
-xx = torch.rand((1),requires_grad = True)
-yy = 3*xx
-zz = yy**2
-zz.backward()
-xx.grad # This is ok
-yy.grad # This gives 0! 
-zz.grad # This should give 1!
-"""
