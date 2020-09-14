@@ -21,7 +21,6 @@ def sisdr(estimates, targets,eps=0,scale_invariant=True):
         estimates = estimates[None,...]
         targets = targets[None,...]
     
-    
     if scale_invariant == True:
         # scaling [batch_size,nb_channels,1]
         scaling = torch.sum(estimates * targets, dim=-1,keepdim=True) / (torch.sum(targets * targets, dim=-1, keepdim=True) + eps) # to discuss
@@ -41,13 +40,15 @@ def sisdr(estimates, targets,eps=0,scale_invariant=True):
     # SI_SDR [batch_size,nb_channels,1]
     SI_SDR = - 10*torch.log10(Starg/(eps+Sres) + eps)
 
-    return torch.median(SI_SDR) # return mean over all samples in a batch
+    return torch.median(SI_SDR) # return median over all samples in a batch
 
-def sisdr_framewise(estimates, targets, sample_rate,eps=0,scale_invariant=True):
+def sisdr_framewise(estimates, targets, sample_rate,eps=1e-8,scale_invariant=True):
     """
     input:
-          estimates: separated signals, (batch_size,nb_channels,nb_samples) tensor
-          targets: reference signals, (batch_size,nb_channels,nb_samples) tensor
+          estimates: separated signals, (batch_size,nb_channels,nb_samples)
+                        OR (nb_channels,nb_samples) tensor
+          targets: reference signals, (batch_size,nb_channels,nb_samples) 
+                        OR (nb_channels,nb_samples) tensor tensor
           sample_rate: sample rate of the estimates and targets
     Return:
           sisdr: SI-SDR mean over all samples in a batch
@@ -72,7 +73,7 @@ def sisdr_framewise(estimates, targets, sample_rate,eps=0,scale_invariant=True):
     # reshaped [batch_size,nb_channels,number of seconds, sample rate]
     estimates_reshaped = estimates[...,:nb_samples//sample_rate * sample_rate].view(batch_size,nb_channels,-1,sample_rate)
     targets_reshaped = targets[...,:nb_samples//sample_rate * sample_rate].view(batch_size,nb_channels,-1,sample_rate)
-
+    
     if scale_invariant == True:
         # scaling [batch_size,nb_channels,number of seconds,1]
         scaling = torch.sum(estimates_reshaped * targets_reshaped, dim=-1,keepdim=True) / (torch.sum(targets_reshaped * targets_reshaped, dim=-1, keepdim=True) + eps) # to discuss
@@ -85,12 +86,18 @@ def sisdr_framewise(estimates, targets, sample_rate,eps=0,scale_invariant=True):
     e_residual = estimates_reshaped - e_target
     
     # Starg [batch_size,number of seconds,1]
-    Starg= torch.sum(e_target**2,dim=-1,keepdim=True)
-    Sres= torch.sum(e_residual**2,dim=-1,keepdim=True)
+    Starg= torch.sum(e_target**2,dim=-1,keepdim=True).view(batch_size,nb_channels,-1)
+    Sres= torch.sum(e_residual**2,dim=-1,keepdim=True).view(batch_size,nb_channels,-1)
     
-    # SI_SDR [batch_size,number of seconds,1]
+    # SI_SDR [batch_size,nb_channels,number of seconds]
     SI_SDR = - 10*torch.log10(Starg/(eps+Sres) + eps)
-    return torch.median(SI_SDR) # return mean over all samples in a batch and channels
+    #print(SI_SDR[0][0])
+    #print(SI_SDR.shape)
+    
+    if eps == 0:
+        SI_SDR = SI_SDR[torch.isfinite(SI_SDR)]
+    
+    return torch.median(SI_SDR) # return median over all samples in a batch and channels
 
 
 if __name__ == '__main__':
@@ -104,8 +111,7 @@ if __name__ == '__main__':
     
     mixture, sample_rate = torchaudio.load('convtasnet_1_0mixture.wav')
     target, sample_rate = torchaudio.load('convtasnet_1_0target.wav')
-    estimate,sample_rate = torchaudio.load('convtasnet_400_0estimate.wav')
-    
+    estimate,sample_rate = torchaudio.load('convtasnet_300_0estimate.wav')    
 
     target = np.array(target)
     estimate = np.array(estimate)

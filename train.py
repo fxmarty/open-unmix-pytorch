@@ -105,6 +105,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         if model_name_general in ('open-unmix', 'deep-u-net'):
             Y_hat = unmix(x)
             Y = unmix.transform(y)
+            
             """
             MIX = unmix.transform(x)
             
@@ -194,8 +195,10 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
             """
             loss = 0
             for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],unmix.sp_rate)
-                
+                loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],
+                                                unmix.sp_rate,eps=1e-8)
+            
+            loss = loss / y.shape[1]
             torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
             losses.update(loss.item(), x.size(0))
         
@@ -267,7 +270,9 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
                 y_hat = unmix(x)
                 loss = 0
                 for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                    loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],unmix.sp_rate)
+                    loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],
+                                                unmix.sp_rate,eps=0)
+                loss = loss / y.shape[1]
                 losses.update(loss.item(), x.size(0))
             try:
                 del y_hat
@@ -411,6 +416,10 @@ def main():
     parser.add_argument('--random-chunks',
                         action='store_true',
                         help='Choose if the start point of a chunk is choosed randomly or not in data.py')
+    
+    parser.add_argument('--joint',
+                        action='store_true',
+                        help='Train jointly for vocals and accompaniment (convtasnet)')
     
     args, _ = parser.parse_known_args()
     
@@ -565,11 +574,16 @@ def main():
     elif args.modelname == 'convtasnet':
         if args.nb_channels == 2:
             raise ValueError("You should not train ConvTasNet with stereo signals.")
+        
+        if args.joint == True:
+            C = 2
+        else:
+            C = 1
         unmix = convtasnet.ConvTasNet(
             normalization_style=args.normalization_style,
             sample_rate=train_dataset.sample_rate,
             nb_channels=args.nb_channels,
-            C=2 # one for the target, one for the rest
+            C=C # If jointly, one for the target and one for the rest
         ).to(device)
         
     
@@ -665,8 +679,6 @@ def main():
                 
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
         
-        
-        #scheduler.step()
         scheduler.step(valid_loss)
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)

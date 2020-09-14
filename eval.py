@@ -6,7 +6,13 @@ import multiprocessing
 import functools
 from pathlib import Path
 import torch
+torch.cuda.init() # to run memory-check when we want (even at the beginning)
+
 import tqdm
+from loss_SI_SDR import sisdr_framewise
+import numpy as np
+
+from utils import memory_check
 
 if __name__ == '__main__':
     # Training settings
@@ -81,10 +87,15 @@ if __name__ == '__main__':
         subsets=args.subset,
         is_wav=args.is_wav
     )
-
-    results = museval.EvalStore()
+    
+    SI_SDRscores_vocals = []
+    SI_SDRscores_accompaniment = []
+    text_file = open(args.evaldir+"metrics.txt", "w")
+    
     for track in tqdm.tqdm(mus.tracks):
-        #print(track.rate)
+        #track = mus.tracks[41]
+        print(track.name)
+        memory_check("Before estimate")
         estimates = test.separate(
             audio=track.audio, # shape [nb_time_points, 2]
             targets=args.targets,
@@ -94,20 +105,39 @@ if __name__ == '__main__':
             softmask=args.softmask,
             device=device
         )
+        memory_check("After estimate")
         if args.outdir:
             mus.save_estimates(estimates, track, args.outdir)
-        
-        # Note that museval module by default deals with stereo tracks just by taking
-        # the mean of it (see _bss_crit function in metrics.py of the module)
-        scores = museval.eval_mus_track(
-            track, estimates, output_dir=args.evaldir
-        ) 
-        
-        #print(scores)
-        
-        results.add_track(scores)
 
-    print(results)
-    method = museval.MethodStore()
-    method.add_evalstore(results, args.model)
-    method.save(args.model + '.pandas')
+        vocals = torch.from_numpy(track.targets['vocals'].audio.T)
+        accompaniment = torch.from_numpy(track.targets['accompaniment'].audio.T)
+        
+        estimated_vocals = torch.from_numpy(estimates['vocals'].T)
+        estimated_accompaniment = torch.from_numpy(estimates['accompaniment'].T)
+        
+        if vocals.shape != estimated_vocals.shape:
+            raise ValueError("Targets and estimates should have the same shape!")
+        
+        vocals_SISDR = sisdr_framewise(estimated_vocals,vocals,
+                                        sample_rate=track.rate,eps=0)
+        
+        accompaniment_SISDR  = sisdr_framewise(estimated_accompaniment,accompaniment, sample_rate=track.rate,eps=0)
+        
+        SI_SDRscores_vocals.append(-vocals_SISDR)
+        SI_SDRscores_accompaniment.append(-accompaniment_SISDR)
+        print("vocals:",-vocals_SISDR)
+        print("accomp:",-accompaniment_SISDR)
+        print("sum:",-vocals_SISDR-accompaniment_SISDR)
+        
+        del vocals, accompaniment, estimated_vocals, estimated_accompaniment
+        torch.cuda.empty_cache()
+    
+    summed = np.array(SI_SDRscores_vocals) + np.array(SI_SDRscores_accompaniment)
+    print(summed)
+    print("mean loss:", np.mean(summed))
+
+    text_file.write("SI-SDR for vocals: " + str(np.mean(SI_SDRscores_vocals)))
+    text_file.write("\n")
+    text_file.write("SI-SDR for accompaniment: "
+                        + str(np.mean(SI_SDRscores_accompaniment)))
+    text_file.close()

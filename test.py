@@ -146,7 +146,7 @@ def separate(
         # convert numpy audio to torch
         mixture = torch.tensor(audio.T[None, ...]).float().to(device)
         # mixture shape [1,2,nb_time_points]
-    
+        
         source_names = []
         V = []
         
@@ -166,10 +166,12 @@ def separate(
             # Revert to channel dimension if mono model
             if nb_channels_model == 1: 
                 if modelname in ('open-unmix', 'deep-u-net'):
-                    Vj = Vj.reshape(Vj.shape[0],1,2,-1) # [nb_frames, 1, 2, nb_bins]
+                    Vj = Vj.reshape(Vj.shape[0],1,2,-1)
+                    # out [nb_frames, 1, 2, nb_bins]
                 elif modelname in ('convtasnet'):
                     Vj = Vj.transpose(2,1,0,3)
                     # out [1, C, nb_channels, nb_timesteps]
+            
             if modelname in ('open-unmix', 'deep-u-net') and softmask:
                 # only exponentiate the model if we use softmask
                 Vj = Vj**alpha
@@ -178,8 +180,8 @@ def separate(
             if modelname in ('open-unmix','deep-u-net'):
                 V.append(Vj[:, 0, ...])  # remove sample dim
             if modelname in ('convtasnet'):
-                V.append(Vj[0,0].T) # voice
-                V.append(Vj[0,1].T) # accompaniment
+                V.append(Vj[0,0].T/np.max(np.abs(Vj[0,0]))) # voice
+                V.append(Vj[0,1].T/np.max(np.abs(Vj[0,1]))) # accompaniment
             source_names += [target]
         
         
@@ -213,6 +215,7 @@ def separate(
                     n_hopsize=unmix_target.stft.n_hop
                 )
                 estimates[name] = audio_hat.T
+                print("estimate shape:",estimates[name].shape)
         
         if modelname == 'deep-u-net': # without wiener filtering
             phase_audio = np.angle(X)[...,np.newaxis]

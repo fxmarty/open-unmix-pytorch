@@ -73,6 +73,7 @@ def load_datasets(parser, args):
             random_track_mix=True,
             data_augmentation=args.data_augmentation,
             nb_channels=args.nb_channels,
+            joint=args.joint,
             **dataset_kwargs
         )
 
@@ -82,7 +83,7 @@ def load_datasets(parser, args):
         valid_dataset = MUSDBDataset(
             modelname = args.modelname, split='valid',
             samples_per_track=3-args.nb_channels, seq_duration=None,
-            nb_channels=args.nb_channels,
+            nb_channels=args.nb_channels,joint=args.joint,
             **dataset_kwargs
         )
 
@@ -92,6 +93,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         modelname,
+        joint,
         target='vocals',
         root=None,
         download=False,
@@ -149,6 +151,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
 
         """
         self.modelname = modelname
+        self.joint = joint
         self.is_wav = is_wav
         self.seq_duration = seq_duration
         self.target = target
@@ -250,9 +253,11 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 raise ValueError("Target has not been given.")
             
             if self.modelname == 'convtasnet':
-                y_accompaniment = x - y
-                y = torch.stack((y,y_accompaniment),dim=0)
-
+                if self.joint == True:
+                    y_accompaniment = x - y
+                    y = torch.stack((y,y_accompaniment),dim=0)
+                else:
+                    y = torch.unsqueeze(y,0)
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
         else:
@@ -271,8 +276,11 @@ class MUSDBDataset(torch.utils.data.Dataset):
             # if nb_channels = 2, use both channels
             
             if self.modelname == 'convtasnet':
-                y_accompaniment = x - y
-                y = torch.stack((y,y_accompaniment),dim=0)
+                if self.joint == True:
+                    y_accompaniment = x - y
+                    y = torch.stack((y,y_accompaniment),dim=0)
+                else:
+                    y = torch.unsqueeze(y,0)
             
             #x = x[...,:x.shape[-1]//2]
             #y = y[...,:y.shape[-1]//2]
