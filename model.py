@@ -7,6 +7,7 @@ from torchsummary import summary
 
 import normalization
 import tf_transforms
+import timeTransformPosteriograms
 
 class OpenUnmix(nn.Module):
     def __init__(
@@ -16,6 +17,7 @@ class OpenUnmix(nn.Module):
         n_hop=1024,
         input_is_spectrogram=False,
         hidden_size=512,
+        phoneme_hidden_size=50,
         nb_channels=2,
         sample_rate=44100,
         nb_layers=3,
@@ -24,11 +26,13 @@ class OpenUnmix(nn.Module):
         max_bin=None,
         unidirectional=False,
         power=1,
-        print=False
+        phonemeNumber = 64 # to modify
     ):
         """
-        Input: (nb_samples, nb_channels, nb_timesteps)
-            or (nb_frames, nb_samples, nb_channels, nb_bins)
+        Input:
+        - mixture x (nb_samples, nb_channels, nb_timesteps)
+                    or (nb_frames, nb_samples, nb_channels, nb_bins)
+        - phoneme (nb_samples, nb_samples_phoneme_dim, nb_phonemes)
         Output: Power/Mag Spectrogram
                 (nb_frames, nb_samples, nb_channels, nb_bins)
         """
@@ -50,6 +54,8 @@ class OpenUnmix(nn.Module):
         # model parameter, saved in state_dict but not trainable
         self.register_buffer('sample_rate', torch.tensor(sample_rate))
         self.sp_rate = sample_rate
+        self.fft_window_duration = n_fft/self.sp_rate
+        self.fft_hop_duration = n_hop/self.sp_rate
 
         if input_is_spectrogram:
             self.transform = tf_transforms.NoOp()
@@ -69,21 +75,21 @@ class OpenUnmix(nn.Module):
         self.bn1 = BatchNorm1d(hidden_size)
 
         if unidirectional:
-            lstm_hidden_size = hidden_size
+            lstm_hidden_size = hidden_size+phoneme_hidden_size
         else:
-            lstm_hidden_size = hidden_size // 2
+            lstm_hidden_size = (hidden_size+phoneme_hidden_size) // 2
 
         self.lstm = LSTM(
-            input_size=hidden_size,
+            input_size=hidden_size+phoneme_hidden_size,
             hidden_size=lstm_hidden_size,
             num_layers=nb_layers,
             bidirectional=not unidirectional,
             batch_first=False,
-            dropout=0.4,
+            dropout=0.4
         )
 
         self.fc2 = Linear(
-            in_features=hidden_size*2,
+            in_features=(hidden_size+phoneme_hidden_size)*2,
             out_features=hidden_size,
             bias=False
         )
@@ -104,14 +110,40 @@ class OpenUnmix(nn.Module):
         self.output_mean = Parameter(
             torch.ones(self.nb_output_bins).float()
         )
-
-    def forward(self, x):
+        
+        # phoneme processing
+        self.fc1Phoneme = Linear(phonemeNumber, phoneme_hidden_size)
+        
+        self.lstmPhoneme = LSTM(
+            input_size=phoneme_hidden_size,
+            hidden_size=phoneme_hidden_size//2,
+            num_layers=2,
+            bidirectional=True,
+            batch_first=True,
+            dropout=0.3
+        )
+        
+    def forward(self, x, phoneme):
         # check for waveform or spectrogram
         # transform to spectrogram if (nb_samples, nb_channels, nb_timesteps)
         # and reduce feature dimensions, therefore we reshape
         x = self.transform(x)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
-
+        
+        #print(x.shape)
+        #print(phoneme.shape)
+        
+        #out [nb_samples, nb_frames, nb_phonemes])
+        phoneme = timeTransformPosteriograms.timeTransform(phoneme,nb_frames,0.016,
+                                self.fft_window_duration,self.fft_hop_duration)
+        
+        phoneme = F.relu(self.fc1Phoneme(phoneme))
+        phoneme = F.relu(self.lstmPhoneme(phoneme)[0])
+        # out [nb_samples, nb_frames, phoneme_hidden_size]
+        
+        phoneme = torch.transpose(phoneme,0,1)
+        # out [nb_frames,nb_samples,phoneme_hidden_size]
+        
         mix = x.detach().clone()
         
         # crop, because we don't necessarily keep all bins due to the bandwidth
@@ -126,16 +158,20 @@ class OpenUnmix(nn.Module):
         # normalize every instance in a batch
         x = self.bn1(x)
         x = x.reshape(nb_frames, nb_samples, self.hidden_size)
-        # squash range ot [-1, 1]
+        # squash range to [-1, 1]
         x = torch.tanh(x)
-
+        
+        # out [nb_frames, nb_samples,hidden_size+phoneme_hidden_size]
+        x = torch.cat([x,phoneme],dim=-1)
+        
         # apply 3-layers of stacked LSTM
         lstm_out = self.lstm(x)
 
         # lstm skip connection
         x = torch.cat([x, lstm_out[0]], -1)
-
+        
         # first dense stage + batch norm
+        #input to fc2 [nb_frames*nb_samples, 2*(hidden_size+phoneme_hidden_size)]
         x = self.fc2(x.reshape(-1, x.shape[-1]))
         x = self.bn2(x)
 
@@ -145,7 +181,6 @@ class OpenUnmix(nn.Module):
         x = self.fc3(x)
         x = self.bn3(x)
         
-        #print(x.shape)
         # reshape back to original dim
         x = x.reshape(nb_frames, nb_samples, nb_channels, self.nb_output_bins)
 
@@ -153,10 +188,9 @@ class OpenUnmix(nn.Module):
         x *= self.output_scale
         x += self.output_mean
         
-        #print(x.shape)
         # since our output is non-negative, we can apply RELU
         x = F.relu(x) * mix
-        #print(x.shape)
+        
         return x
 
 if __name__ == '__main__':

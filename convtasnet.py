@@ -252,8 +252,6 @@ if __name__ == '__main__':
     dot.format="png"
     im=dot.render("attached_hl",cleanup=True)
     """
-    #model.pad_signal(mix)
-    #print(torch.cuda.max_memory_allocated(0)/1e9)
     
     #print(pytorch_model_summary.summary(model, mix, show_input=False))
     

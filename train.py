@@ -96,81 +96,17 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
     global batch_seen
     i = 0
     # Loop by number of tracks * number of samples per track / batch size
-    for x, y in pbar:
+    for x, phoneme, y in pbar:
         pbar.set_description("Training batch")
-        x, y = x.to(device), y.to(device)
+        x, phoneme, y = x.to(device), phoneme.to(device), y.to(device)
         optimizer.zero_grad()
         
         sys.stdout.write("\rBatch number %i" % i)
         sys.stdout.flush()
         if model_name_general in ('open-unmix', 'deep-u-net'):
-            Y_hat = unmix(x)
+            Y_hat = unmix(x,phoneme)
             Y = unmix.transform(y)
-            """
-            MIX = unmix.transform(x)
-            
-            if epoch_num % 30 == 0 and i <=5 and model_name_general == 'deep-u-net':
-                Y_np = np.array(Y.detach().cpu())
-                Y_hat_np = np.array(Y_hat.detach().cpu())
-                MIX_np = np.array(MIX.detach().cpu())
-                tps = np.linspace(0,x.shape[2]/unmix.sp_rate,Y_np.shape[0])
-                freq = np.linspace(0,unmix.sp_rate//2,Y_np.shape[-1])
-                
-                print("Shape de Y_np:",Y_np.shape)
-                print("Shape du plot:",Y_np[:,0,0,:].T.shape)
-                print("shape du tps:",tps.shape)
-                print("shape du freq:", freq.shape)
-                
-                morceau = Y_np[:,0,0,:]
-                nonzero = np.nonzero(morceau)
-                #print(np.nonzero(morceau))
-                
-                if len(nonzero[0]) > 0:
-                    minval = np.min(morceau[nonzero])
-                    maxval = np.max(morceau[nonzero])
-                else:
-                    minval = 0
-                    maxval = 0
 
-                #if epoch_num == 1:
-                fig, ax = plt.subplots()
-                
-                pcm = ax.pcolormesh(tps, freq, Y_np[:,0,0,:].T,norm=colors.SymLogNorm(vmin=0,vmax=maxval,linthresh=minval),cmap='jet')
-                fig.colorbar(pcm, ax=ax, extend='max')
-
-                #plt.pcolormesh(tps, freq, Y_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
-                plt.title('STFT Magnitude for the target')
-                plt.ylabel('Frequency [Hz]')
-                plt.xlabel('Time [sec]')
-                
-                #plt.savefig('stft_'+str(i)+'_target_'+str(epoch_num)+'.png')
-                plt.savefig('stft_'+str(epoch_num)+'_'+str(i)+'_target'+'.png')
-                
-                #plt.pcolormesh(tps, freq, MIX_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
-                fig, ax = plt.subplots()
-                pcm = ax.pcolormesh(tps, freq, MIX_np[:,0,0,:].T,norm=colors.SymLogNorm(vmin=0,vmax=maxval,linthresh=minval),cmap='jet')
-                fig.colorbar(pcm, ax=ax, extend='max')
-                plt.title('STFT Magnitude for the mixture')
-                plt.ylabel('Frequency [Hz]')
-                plt.xlabel('Time [sec]')
-                
-                #plt.savefig('stft_'+str(i)+'_mixture_'+str(epoch_num)+'.png')
-                plt.savefig('stft_'+str(epoch_num)+'_'+str(i)+'_mixture'+'.png')
-                
-                #plt.pcolormesh(tps, freq, Y_hat_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
-                fig, ax = plt.subplots()
-                pcm = ax.pcolormesh(tps, freq, Y_hat_np[:,0,0,:].T,norm=colors.SymLogNorm(vmin=0,vmax=maxval,linthresh=minval),cmap='jet')
-                fig.colorbar(pcm, ax=ax, extend='max')
-                plt.title('STFT Magnitude for the estimate, epoch' + str(epoch_num))
-                plt.ylabel('Frequency [Hz]')
-                plt.xlabel('Time [sec]')
-                
-                #plt.savefig('stft_'+str(i)+'_estimate_'+str(epoch_num)+'.png')
-                plt.savefig('stft_'+str(epoch_num)+'_'+str(i)+'_estimate'+'.png')
-                
-                plt.close("all")
-                plt.clf()
-            """
             if model_name_general == 'open-unmix':
                 loss = torch.nn.functional.mse_loss(Y_hat, Y)
             
@@ -180,19 +116,8 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
             losses.update(loss.item(), Y.size(1))
         
         if model_name_general == 'convtasnet':
-            y_hat = unmix(x)
+            y_hat = unmix(x,phoneme)
 
-            """
-            if epoch_num % 10 == 0:
-                #cpuu = torch.device("cpu")
-                #print(y_hat[0].detach().cpu())
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'estimate.wav', y_hat[0][0][0].detach().cpu(), unmix.sp_rate)
-                
-            if epoch_num == 1:
-                #cpuu = torch.device("cpu")
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'target.wav', y[0][0][0].detach().cpu(), unmix.sp_rate)
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'mixture.wav', x[0][0].detach().cpu(), unmix.sp_rate)
-            """
             loss = 0
             for j in range(y.shape[1]): # add up SI-SNR for the different estimates
                 loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],unmix.sp_rate)
@@ -203,19 +128,6 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         i = i + 1
         loss.backward()
         
-        #plot_grad_flow(unmix.named_parameters(),i)
-        """
-        for name, param in unmix.named_parameters():
-            print(name,param.size(),"---",param.requires_grad)
-            try:
-                print(param.grad.abs().mean())
-                print("Shape gradient:",param.grad.shape)
-            except:
-                print("----------------NONETYPE ERROR")
-            
-            if name == 'repeats.1.7.res_out.bias':
-                print(param.grad)
-        """
         optimizer.step()
         try:
             del y_hat
@@ -228,11 +140,6 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         del x
         del y
         torch.cuda.empty_cache()
-        """
-        if tb is not None:
-            batch_seen = batch_seen + 1 
-            writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
-        """
     
     return losses.avg
 
@@ -249,13 +156,6 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
                 Y_hat = unmix(x)
                 Y = unmix.transform(y)
                 
-                """
-                # deep-u-net requires normalization for the reference too
-                if model_name_general == 'deep-u-net':
-                    Ymax = torch.max(Y)
-                    Ymin = torch.min(Y)
-                    Y = (Y - Ymin)/(Ymax-Ymin)
-                """
                 if model_name_general == 'open-unmix':
                     loss = torch.nn.functional.mse_loss(Y_hat, Y)
                 
@@ -281,11 +181,7 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
             del x
             del y
             torch.cuda.empty_cache()
-        """
-        if tb is not None:
-            print("Valid:",losses.avg)
-            writerValidationLoss.add_scalar('Loss', losses.avg,batch_seen)
-        """
+
         return losses.avg
 
 # Called only when normalization_style = overall
@@ -306,7 +202,7 @@ def get_statistics(args, dataset):
     dataset_scaler.seq_duration = None
     pbar = tqdm.tqdm(range(len(dataset_scaler)), disable=args.quiet)
     for ind in pbar:
-        x, y = dataset_scaler[ind]
+        x, phoneme, y = dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
         X = spec(x[None, ...])
         if args.nb_channels == 2: # required by partial_fit
@@ -339,6 +235,9 @@ def main():
                         ],
                         help='Name of the dataset.')
     parser.add_argument('--root', type=str, help='root path of dataset')
+    
+    parser.add_argument('--root-phoneme', type=str, help='root path of .pt phonemes, at acoustic model resolution')
+    
     parser.add_argument('--output', type=str, default="open-unmix",
                         help='provide output path base folder name')
     parser.add_argument('--model', type=str, help='Path to checkpoint folder')

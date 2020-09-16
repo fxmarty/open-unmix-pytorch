@@ -3,7 +3,7 @@ import torch
 import os
 import numpy as np
 import math
-
+    
 def memory_check(comment):
     print(comment,torch.cuda.memory_reserved(0)*1e-9, "GB out of",torch.cuda.get_device_properties(0).total_memory*1e-9, "GB used.")
 
@@ -212,14 +212,3 @@ class EarlyStopping(object):
             self.is_better = lambda a, best: a < best - min_delta
         if mode == 'max':
             self.is_better = lambda a, best: a > best + min_delta
-"""
-###
-import torch
-xx = torch.rand((1),requires_grad = True)
-yy = 3*xx
-zz = yy**2
-zz.backward()
-xx.grad # This is ok
-yy.grad # This gives 0! 
-zz.grad # This should give 1!
-"""

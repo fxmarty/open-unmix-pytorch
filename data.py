@@ -7,6 +7,9 @@ import musdb
 import torch
 import tqdm
 import librosa
+import glob
+import math
+import numpy as np
 
 import random
 
@@ -34,7 +37,6 @@ def _augment_channelswap(audio):
         return torch.flip(audio, [0])
     else:
         return audio
-
 def load_datasets(parser, args):
     """Loads the specified dataset from commandline arguments
     
@@ -64,7 +66,7 @@ def load_datasets(parser, args):
             [globals()['_augment_' + aug] for aug in args.source_augmentations]
         )
         
-        train_dataset = MUSDBDataset(
+        train_dataset = MUSDBDatasetInformed(
             modelname = args.modelname,
             split='train',
             samples_per_track=args.samples_per_track,
@@ -73,25 +75,28 @@ def load_datasets(parser, args):
             random_track_mix=True,
             data_augmentation=args.data_augmentation,
             nb_channels=args.nb_channels,
+            root_phoneme = args.root_phoneme,
             **dataset_kwargs
         )
 
         # samples_per_track is 1 for stereo case, 2 for mono case, and that is
         # because MUSDB is a stereo dataset. If we train for the mono case,
         # both left and right tracks will be used for validation.
-        valid_dataset = MUSDBDataset(
+        valid_dataset = MUSDBDatasetInformed(
             modelname = args.modelname, split='valid',
             samples_per_track=3-args.nb_channels, seq_duration=None,
             nb_channels=args.nb_channels,
+            root_phoneme = args.root_phoneme,
             **dataset_kwargs
         )
 
     return train_dataset, valid_dataset, args
 
-class MUSDBDataset(torch.utils.data.Dataset):
+class MUSDBDatasetInformed(torch.utils.data.Dataset):
     def __init__(
         self,
         modelname,
+        root_phoneme=None,
         target='vocals',
         root=None,
         download=False,
@@ -148,9 +153,14 @@ class MUSDBDataset(torch.utils.data.Dataset):
             initialization function.
 
         """
+        self.phoneme_window = 0.032 # in seconds
+        self.phoneme_hop = 0.016 # in seconds
+        
         self.modelname = modelname
         self.is_wav = is_wav
-        self.seq_duration = seq_duration
+        # Sequence duration is taken to be a a multiple of the phoneme hop
+        if split == 'train':
+            self.seq_duration = math.ceil(seq_duration/self.phoneme_hop)*self.phoneme_hop
         self.target = target
         self.subsets = subsets
         self.split = split
@@ -168,12 +178,13 @@ class MUSDBDataset(torch.utils.data.Dataset):
             download=download,
             *args, **kwargs
         )
+        self.root_phoneme = root_phoneme
         
         if len(self.mus.tracks) > 0:
             self.sample_rate = self.mus.tracks[0].rate
         
         else:
-            self.sample_rate = 8192 # to modify manually for minimal tests
+            self.sample_rate = 44100 # to modify manually for minimal tests
         
         self.dtype = dtype
         
@@ -182,8 +193,10 @@ class MUSDBDataset(torch.utils.data.Dataset):
             for i in range(len(self.mus)):
                 track = self.mus.tracks[i]
                 for j in range(self.samples_per_track):
-                    chunk_start = random.uniform(0,
-                                            track.duration - self.seq_duration)
+                    chunk_start = math.floor(random.uniform(
+                        0.017, track.duration - self.seq_duration)
+                        / self.phoneme_hop) * self.phoneme_hop
+                    
                     self.dataindex[i][j] = chunk_start
                     
     def __getitem__(self, index):
@@ -195,8 +208,6 @@ class MUSDBDataset(torch.utils.data.Dataset):
         print(random.random())
         print("---")
         """
-        # For having the 'instrumental' into the targets too
-        if self.modelname == 'convtasnet': non_target_inds = []
 
         # select track
         track = self.mus.tracks[index // self.samples_per_track]
@@ -204,25 +215,39 @@ class MUSDBDataset(torch.utils.data.Dataset):
         # at training time we assemble a custom mix
         if self.split == 'train' and self.seq_duration:
             for k, source in enumerate(self.mus.setup['sources']):
-                # memorize index of target source
-                if source == self.target:
-                    target_ind = k
-                else:
-                    if self.modelname == 'convtasnet': non_target_inds.append(k)
-                
                 # select a random track if data augmentation
                 if self.random_track_mix and self.data_augmentation == 'yes':
                     track = random.choice(self.mus.tracks)
+                
+                # memorize index of target source
+                if source == self.target:
+                    target_ind = k
                 
                 # set the excerpt duration
                 track.chunk_duration = self.seq_duration
                 
                 # set random start position if data augmentation
+                # have start time synchronized with phoneme window
                 if self.random_chunks:
-                    track.chunk_start = random.uniform(
-                        0, track.duration - self.seq_duration)
+                    track.chunk_start = chunk_start = math.floor(random.uniform(
+                        0.017, track.duration - self.seq_duration)
+                        / self.phoneme_hop) * self.phoneme_hop
                 else:
                     track.chunk_start = self.dataindex[index // self.samples_per_track][index % self.samples_per_track].item()
+                
+                # load phoneme information over the track if vocals
+                if source == 'vocals':
+                    # phoneme shape [phoneme_time_dim,nb_phoneme]
+                    phoneme = np.load(self.root_phoneme+'/'
+                                    +self.split+'_'+track.name+'.npy',
+                                mmap_mode='r+')
+
+                    startFrame = math.floor(track.chunk_start/self.phoneme_hop - 1)
+                    nbFrameDuration = math.floor(track.chunk_duration
+                                /self.phoneme_hop) + 2
+                    phoneme = phoneme[startFrame:startFrame
+                                + nbFrameDuration,:]
+                    phoneme = torch.from_numpy(phoneme)
                 
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
@@ -269,6 +294,11 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 track.targets[self.target].audio.T,
                 dtype=self.dtype
             )
+            
+            phoneme = np.load(self.root_phoneme+'/'
+                                    +self.split+'_'+track.name+'.npy')
+            phoneme = torch.from_numpy(phoneme)
+            
             if self.nb_channels == 1: # select left or right depending on index even or not
                 x = torch.unsqueeze(x[index%2],0)
                 y = torch.unsqueeze(y[index%2],0)
@@ -277,11 +307,9 @@ class MUSDBDataset(torch.utils.data.Dataset):
             if self.modelname == 'convtasnet':
                 y_accompaniment = x - y
                 y = torch.stack((y,y_accompaniment),dim=0)
-            
-            #x = x[...,:x.shape[-1]//2]
-            #y = y[...,:y.shape[-1]//2]
-
-        return x, y
+        
+        # x shape [nb_channels, nb_time_frames]
+        return x, phoneme, y
 
     def __len__(self):
         # self.mus.tracks : liste of the names of the tracks in train folder
