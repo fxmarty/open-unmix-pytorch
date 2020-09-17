@@ -95,7 +95,6 @@ if __name__ == '__main__':
     for track in tqdm.tqdm(mus.tracks):
         #track = mus.tracks[41]
         print(track.name)
-        memory_check("Before estimate")
         estimates = test.separate(
             audio=track.audio, # shape [nb_time_points, 2]
             targets=args.targets,
@@ -105,7 +104,7 @@ if __name__ == '__main__':
             softmask=args.softmask,
             device=device
         )
-        memory_check("After estimate")
+        
         if args.outdir:
             mus.save_estimates(estimates, track, args.outdir)
 

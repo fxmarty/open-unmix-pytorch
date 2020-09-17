@@ -281,10 +281,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     y = torch.stack((y,y_accompaniment),dim=0)
                 else:
                     y = torch.unsqueeze(y,0)
-            
-            #x = x[...,:x.shape[-1]//2]
-            #y = y[...,:y.shape[-1]//2]
-
+        # x shape [nb_channels, nb_time_frames] 
         return x, y
 
     def __len__(self):

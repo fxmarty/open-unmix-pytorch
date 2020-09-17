@@ -251,13 +251,6 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
                 Y_hat = unmix(x)
                 Y = unmix.transform(y)
                 
-                """
-                # deep-u-net requires normalization for the reference too
-                if model_name_general == 'deep-u-net':
-                    Ymax = torch.max(Y)
-                    Ymin = torch.min(Y)
-                    Y = (Y - Ymin)/(Ymax-Ymin)
-                """
                 if model_name_general == 'open-unmix':
                     loss = torch.nn.functional.mse_loss(Y_hat, Y)
                 
@@ -585,7 +578,7 @@ def main():
             nb_channels=args.nb_channels,
             C=C # If jointly, one for the target and one for the rest
         ).to(device)
-        
+    
     
     optimizer = torch.optim.Adam(
         unmix.parameters(),
@@ -601,11 +594,6 @@ def main():
         cooldown=10
     )
     
-    """
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-            gamma=args.lr_decay_gamma,
-            milestones=[i*args.lr_decay_patience for i in range(1,int(args.epochs/args.lr_decay_patience))])
-    """
     es = utils.EarlyStopping(patience=args.patience)
     
     # Use tensorboard if specified as an argument

@@ -71,7 +71,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 normalization_style=results['args']['normalization_style'],
                 nb_channels=results['args']['nb_channels'],
                 sample_rate=16000,
-                C=2,
+                C=2
             )
             
             

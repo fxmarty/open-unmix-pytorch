@@ -23,8 +23,7 @@ class OpenUnmix(nn.Module):
         input_scale=None,
         max_bin=None,
         unidirectional=False,
-        power=1,
-        print=False
+        power=1
     ):
         """
         Input: (nb_samples, nb_channels, nb_timesteps)
@@ -145,7 +144,6 @@ class OpenUnmix(nn.Module):
         x = self.fc3(x)
         x = self.bn3(x)
         
-        #print(x.shape)
         # reshape back to original dim
         x = x.reshape(nb_frames, nb_samples, nb_channels, self.nb_output_bins)
 
@@ -153,10 +151,9 @@ class OpenUnmix(nn.Module):
         x *= self.output_scale
         x += self.output_mean
         
-        #print(x.shape)
         # since our output is non-negative, we can apply RELU
         x = F.relu(x) * mix
-        #print(x.shape)
+
         return x
 
 if __name__ == '__main__':
@@ -174,4 +171,3 @@ if __name__ == '__main__':
     print(pytorch_model_summary.summary(umx, data, show_input=True))
     
     #summary(umx, input_data=data,batch_dim=1)
-    #demucs.forward(torch.Tensor(np.ones((1,2,220550))).to(device))
