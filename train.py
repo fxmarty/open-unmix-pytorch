@@ -3,7 +3,6 @@ import argparse
 import model
 import deep_u_net
 import convtasnet
-import museval
 
 import data
 import utils
@@ -120,8 +119,10 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
 
             loss = 0
             for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],unmix.sp_rate)
-                
+                loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],
+                                                unmix.sp_rate,eps=1e-8)
+            
+            loss = loss / y.shape[1]
             torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
             losses.update(loss.item(), x.size(0))
         
@@ -168,7 +169,10 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
                 y_hat = unmix(x)
                 loss = 0
                 for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                    loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],unmix.sp_rate)
+                    loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],
+                                                unmix.sp_rate,eps=0)
+                
+                loss = loss / y.shape[1]
                 losses.update(loss.item(), x.size(0))
             try:
                 del y_hat
@@ -311,6 +315,10 @@ def main():
     parser.add_argument('--random-chunks',
                         action='store_true',
                         help='Choose if the start point of a chunk is choosed randomly or not in data.py')
+
+    parser.add_argument('--joint',
+                        action='store_true',
+                        help='Train jointly for vocals and accompaniment (convtasnet)')
     
     args, _ = parser.parse_known_args()
     
@@ -465,13 +473,19 @@ def main():
     elif args.modelname == 'convtasnet':
         if args.nb_channels == 2:
             raise ValueError("You should not train ConvTasNet with stereo signals.")
+        
+        if args.joint == True:
+            C = 2
+        else:
+            C = 1
+        
         unmix = convtasnet.ConvTasNet(
             normalization_style=args.normalization_style,
             sample_rate=train_dataset.sample_rate,
             nb_channels=args.nb_channels,
-            C=2 # one for the target, one for the rest
+            C=C # If jointly, one for the target and one for the rest
         ).to(device)
-        
+    
     
     optimizer = torch.optim.Adam(
         unmix.parameters(),
@@ -479,8 +493,6 @@ def main():
         weight_decay=args.weight_decay
     )
     
-    #optimizer = torch.optim.SGD(unmix.parameters(), lr=args.lr, momentum=0.5)
-
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         factor=args.lr_decay_gamma,
@@ -551,7 +563,6 @@ def main():
         best_epoch = 0
 
     for epoch in t:
-        #memory_check("At the start of epoch "+str(epoch)+":")
         t.set_description("Training Epoch")
         end = time.time()
         
@@ -559,10 +570,9 @@ def main():
             print(param_group['lr'])
 
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
-                
-        #memory_check("Just before validation (epoch "+str(epoch)+"):")
+        
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
-        #memory_check("Just after validation (epoch "+str(epoch)+"):")
+
         scheduler.step(valid_loss)
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)
@@ -616,9 +626,6 @@ def main():
         if stop:
             print("Apply Early Stopping")
             break
-        
-        #memory_check("Just at the end of epoch "+str(epoch)+"):")
-        
     
     if args.tb is not None:
         writerTrainLoss.close()

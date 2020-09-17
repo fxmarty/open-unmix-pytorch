@@ -208,4 +208,3 @@ if __name__ == '__main__':
     print(pytorch_model_summary.summary(umx, data, show_input=True))
     
     #summary(umx, input_data=data,batch_dim=1)
-    #demucs.forward(torch.Tensor(np.ones((1,2,220550))).to(device))

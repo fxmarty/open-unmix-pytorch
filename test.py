@@ -69,7 +69,9 @@ def load_model(target, model_name='umxhq', device='cpu'):
         if results['args']['modelname'] == 'convtasnet':
             unmix = convtasnet.ConvTasNet(
                 normalization_style=results['args']['normalization_style'],
-                nb_channels=results['args']['nb_channels']
+                nb_channels=results['args']['nb_channels'],
+                sample_rate=16000,
+                C=2
             )
             
             
@@ -140,90 +142,98 @@ def separate(
         dictionary of all restimates as performed by the separation model.
 
     """
-    # convert numpy audio to torch
-    mixture = torch.tensor(audio.T[None, ...]).float().to(device)
-    # mixture shape [1,2,nb_time_points]
-
-    source_names = []
-    V = []
-
-    for j, target in enumerate(tqdm.tqdm(targets)): # tqdm for progress bar
-        unmix_target,modelname,nb_channels_model = load_model(
-            target=target,
-            model_name=model_name,
-            device=device
-        )
+    with torch.no_grad():
+        # convert numpy audio to torch
+        mixture = torch.tensor(audio.T[None, ...]).float().to(device)
+        # mixture shape [1,2,nb_time_points]
         
-        # If the model takes mono as input, put the channels in the number of samples dim
-        if nb_channels_model == 1: 
-            mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
+        source_names = []
+        V = []
         
-        Vj = unmix_target(mixture).cpu().detach().numpy()
+        for j, target in enumerate(tqdm.tqdm(targets)): # tqdm for progress bar
+            unmix_target,modelname,nb_channels_model = load_model(
+                target=target,
+                model_name=model_name,
+                device=device
+            )
+            
+            # If the model takes mono as input, put the channels in the number of samples dim
+            if nb_channels_model == 1: 
+                mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
+            
+            Vj = unmix_target(mixture).cpu().detach().numpy()
+            
+            # Revert to channel dimension if mono model
+            if nb_channels_model == 1: 
+                if modelname in ('open-unmix', 'deep-u-net'):
+                    Vj = Vj.reshape(Vj.shape[0],1,2,-1)
+                    # out [nb_frames, 1, 2, nb_bins]
+                elif modelname in ('convtasnet'):
+                    Vj = Vj.transpose(2,1,0,3)
+                    # out [1, C, nb_channels, nb_timesteps]
+            
+            if modelname in ('open-unmix', 'deep-u-net') and softmask:
+                # only exponentiate the model if we use softmask
+                Vj = Vj**alpha
+    
+            
+            if modelname in ('open-unmix','deep-u-net'):
+                V.append(Vj[:, 0, ...])  # remove sample dim
+            if modelname in ('convtasnet'):
+                V.append(Vj[0,0].T/np.max(np.abs(Vj[0,0]))) # voice
+                V.append(Vj[0,1].T/np.max(np.abs(Vj[0,1]))) # accompaniment
+            source_names += [target]
         
-        # Revert to channel dimension if mono model
-        if nb_channels_model == 1: 
-            Vj = Vj.reshape(Vj.shape[0],1,2,-1) # [nb_frames, 1, 2, nb_bins]
         
-        if softmask:
-            # only exponentiate the model if we use softmask
-            Vj = Vj**alpha
-        # output is nb_frames, nb_samples, nb_channels, nb_bins
-
+        estimates = {}
         
         if modelname in ('open-unmix','deep-u-net'):
-            V.append(Vj[:, 0, ...])  # remove sample dim
-        if modelname in ('convtasnet'):
-            V.append(Vj[0,:].T)
-        source_names += [target]
+            V = np.transpose(np.array(V), (1, 3, 2, 0))
+            #V mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
+            
+            X = unmix_target.stft(mixture).detach().cpu().numpy()
+    
+            # convert to complex numpy type
+            X = X[..., 0] + X[..., 1]*1j
+            X = X[0].transpose(2, 1, 0)
+            # X shape (nb_frames, nb_bins, 2). Complex numbers
         
-    if modelname in ('open-unmix','deep-u-net'):
-        V = np.transpose(np.array(V), (1, 3, 2, 0))
-        #V mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
+        if modelname == 'open-unmix': # with wiener filtering
+            if residual_model or len(targets) == 1:
+                V = norbert.residual_model(V, X, alpha if softmask else 1)
+                source_names += (['residual'] if len(targets) > 1
+                                else ['accompaniment'])
+            
+            Y = norbert.wiener(V, X.astype(np.complex128), niter,
+                            use_softmask=softmask)
+            # Y shape (nb_frames, nb_bins, 2, nb_targets), complex
+            
+            for j, name in enumerate(source_names):
+                audio_hat = istft(
+                    Y[..., j].T,
+                    n_fft=unmix_target.stft.n_fft,
+                    n_hopsize=unmix_target.stft.n_hop
+                )
+                estimates[name] = audio_hat.T
+                print("estimate shape:",estimates[name].shape)
         
-        X = unmix_target.stft(mixture).detach().cpu().numpy()
-
-        # convert to complex numpy type
-        X = X[..., 0] + X[..., 1]*1j
-        X = X[0].transpose(2, 1, 0)
-        # X shape (nb_frames, nb_bins, 2). Complex numbers
-    
-    estimates = {}
-    
-    
-    if modelname == 'open-unmix':
-        if residual_model or len(targets) == 1:
-            V = norbert.residual_model(V, X, alpha if softmask else 1)
-            source_names += (['residual'] if len(targets) > 1
-                            else ['accompaniment'])
+        if modelname == 'deep-u-net': # without wiener filtering
+            phase_audio = np.angle(X)[...,np.newaxis]
+            Y = phase_audio * V
+            
+            for j, name in enumerate(source_names):
+                audio_hat = istft(
+                    Y[..., j].T,
+                    n_fft=unmix_target.stft.n_fft,
+                    n_hopsize=unmix_target.stft.n_hop
+                )
+                estimates[name] = audio_hat.T
         
-        Y = norbert.wiener(V, X.astype(np.complex128), niter,
-                        use_softmask=softmask)
-        # Y shape (nb_frames, nb_bins, 2, nb_targets), complex
+        if modelname == 'convtasnet':
+            source_names.append('accompaniment')
+            for j, name in enumerate(source_names):
+                estimates[name] = V[j]
         
-        for j, name in enumerate(source_names):
-            audio_hat = istft(
-                Y[..., j].T,
-                n_fft=unmix_target.stft.n_fft,
-                n_hopsize=unmix_target.stft.n_hop
-            )
-            estimates[name] = audio_hat.T
-    
-    if modelname == 'deep-u-net': # without wiener filtering
-        phase_audio = np.angle(X)[...,np.newaxis]
-        Y = phase_audio * V
-        
-        for j, name in enumerate(source_names):
-            audio_hat = istft(
-                Y[..., j].T,
-                n_fft=unmix_target.stft.n_fft,
-                n_hopsize=unmix_target.stft.n_hop
-            )
-            estimates[name] = audio_hat.T
-    
-    if modelname == 'convtasnet':
-        for j, name in enumerate(source_names):
-            estimates[name] = V[j]
-    
     return estimates
 
 
@@ -307,6 +317,7 @@ def test_main(
             audio = audio[:, :2]
 
         if rate != samplerate:
+            warnings.warn('Sample rate indicated different than real!')
             # resample to model samplerate if needed
             audio = resampy.resample(audio, rate, samplerate, axis=0)
 
@@ -324,7 +335,7 @@ def test_main(
             residual_model=residual_model,
             device=device
         ) # is a dictionary
-        
+
         # Set in which folder the results should be put
         if not outdir:
             model_path = Path(model)

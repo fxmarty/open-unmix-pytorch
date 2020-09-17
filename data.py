@@ -7,7 +7,6 @@ import musdb
 import torch
 import tqdm
 import librosa
-import glob
 import math
 import numpy as np
 
@@ -76,6 +75,7 @@ def load_datasets(parser, args):
             data_augmentation=args.data_augmentation,
             nb_channels=args.nb_channels,
             root_phoneme = args.root_phoneme,
+            joint=args.joint,
             **dataset_kwargs
         )
 
@@ -87,6 +87,7 @@ def load_datasets(parser, args):
             samples_per_track=3-args.nb_channels, seq_duration=None,
             nb_channels=args.nb_channels,
             root_phoneme = args.root_phoneme,
+            joint=args.joint,
             **dataset_kwargs
         )
 
@@ -96,6 +97,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
     def __init__(
         self,
         modelname,
+        joint,
         root_phoneme=None,
         target='vocals',
         root=None,
@@ -157,6 +159,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         self.phoneme_hop = 0.016 # in seconds
         
         self.modelname = modelname
+        self.joint = joint
         self.is_wav = is_wav
         # Sequence duration is taken to be a a multiple of the phoneme hop
         if split == 'train':
@@ -279,8 +282,11 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 raise ValueError("Target has not been given.")
             
             if self.modelname == 'convtasnet':
-                y_accompaniment = x - y
-                y = torch.stack((y,y_accompaniment),dim=0)
+                if self.joint == True:
+                    y_accompaniment = x - y
+                    y = torch.stack((y,y_accompaniment),dim=0)
+                else:
+                    y = torch.unsqueeze(y,0)
 
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
@@ -305,8 +311,11 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
             # if nb_channels = 2, use both channels
             
             if self.modelname == 'convtasnet':
-                y_accompaniment = x - y
-                y = torch.stack((y,y_accompaniment),dim=0)
+                if self.joint == True:
+                    y_accompaniment = x - y
+                    y = torch.stack((y,y_accompaniment),dim=0)
+                else:
+                    y = torch.unsqueeze(y,0)
         
         # x shape [nb_channels, nb_time_frames]
         return x, phoneme, y
