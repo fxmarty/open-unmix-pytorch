@@ -1,8 +1,8 @@
 import argparse
 
-import model
-import deep_u_net
-import convtasnet
+from models import open_unmix
+from models import deep_u_net
+from models import convtasnet
 
 import data
 import utils
@@ -30,7 +30,9 @@ from datetime import datetime
 import sys
 import normalization
 
-from loss_SI_SDR import sisdr_framewise
+from SDR_metrics import sisdr_framewise
+from SDR_metrics import loss_SI_SDR
+
 from utils import memory_check
 import tf_transforms
 
@@ -181,24 +183,12 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         
         if model_name_general == 'convtasnet':
             y_hat = unmix(x)
-
-            """
-            if epoch_num % 10 == 0:
-                #cpuu = torch.device("cpu")
-                #print(y_hat[0].detach().cpu())
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'estimate.wav', y_hat[0][0][0].detach().cpu(), unmix.sp_rate)
-                
-            if epoch_num == 1:
-                #cpuu = torch.device("cpu")
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'target.wav', y[0][0][0].detach().cpu(), unmix.sp_rate)
-                torchaudio.save('convtasnet_'+str(epoch_num)+'_'+str(i)+'mixture.wav', x[0][0].detach().cpu(), unmix.sp_rate)
-            """
+            
             loss = 0
             for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],
-                                                unmix.sp_rate,eps=1e-8)
+                loss = loss + loss_SI_SDR(sisdr_framewise(y_hat[:,j,...],y[:,j,...],
+                                                unmix.sp_rate,eps=1e-8),eps=1e-8)
             
-            loss = loss / y.shape[1]
             torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
             losses.update(loss.item(), x.size(0))
         
@@ -263,9 +253,9 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
                 y_hat = unmix(x)
                 loss = 0
                 for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                    loss = loss + sisdr_framewise(y_hat[:,j,...],y[:,j,...],
-                                                unmix.sp_rate,eps=0)
-                loss = loss / y.shape[1]
+                    loss = loss + loss_SI_SDR(sisdr_framewise(y_hat[:,j,...],y[:,j,...],
+                                                unmix.sp_rate,eps=1e-8),eps=1e-8)
+
                 losses.update(loss.item(), x.size(0))
             try:
                 del y_hat
@@ -297,7 +287,6 @@ def get_statistics(args, dataset):
     dataset_scaler = copy.deepcopy(dataset)
     dataset_scaler.samples_per_track = 1
     dataset_scaler.augmentations = None
-    dataset_scaler.random_chunks = False
     dataset_scaler.random_track_mix = False
     dataset_scaler.random_interferer_mix = False
     dataset_scaler.seq_duration = None
@@ -390,9 +379,7 @@ def main():
     
     parser.add_argument(
         '--data-augmentation','--data_augmentation',
-        default="yes",
-        choices=['yes', 'no'],
-        type=str,
+        action='store_true',
         help='Change data generation to allow data augmentation between epochs or not'
     )
     
@@ -405,10 +392,6 @@ def main():
     
     parser.add_argument('--tb', default=None,
                         help='use tensorboard, and if so, set name')
-    
-    parser.add_argument('--random-chunks',
-                        action='store_true',
-                        help='Choose if the start point of a chunk is choosed randomly or not in data.py')
     
     parser.add_argument('--joint',
                         action='store_true',
@@ -425,10 +408,7 @@ def main():
     
     if args.normalization_style == None and args.modelname == 'convtasnet':
         parser.set_defaults(normalization_style='none')
-    
-    if args.data_augmentation == 'yes' and args.random_chunks == False:
-        parser.set_defaults(random_chunks=True)
-    
+
     # Update args according to the two conditions above
     args, _ = parser.parse_known_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -473,7 +453,7 @@ def main():
     if args.modelname == 'deep-u-net':
         print("WARNING: Be warned that the sequence length may have been overridden.")
     
-    if args.data_augmentation == 'no':
+    if args.data_augmentation == False:
         print("WARNING: Data augmentation has been disabled.")
     
     print("Sampling rate of dataset:",train_dataset.sample_rate,"Hz")
@@ -540,7 +520,7 @@ def main():
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
         
     if args.modelname == 'open-unmix':
-        unmix = model.OpenUnmix(
+        unmix = open_unmix.OpenUnmix(
             normalization_style=args.normalization_style,
             input_mean=scaler_mean,
             input_scale=scaler_std,
@@ -566,7 +546,7 @@ def main():
     
     elif args.modelname == 'convtasnet':
         if args.nb_channels == 2:
-            raise ValueError("You should not train ConvTasNet with stereo signals.")
+            raise ValueError("ConvTasNet should not be trained with stereo signals.")
         
         if args.joint == True:
             C = 2
@@ -585,7 +565,6 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay
     )
-    
     
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
@@ -664,7 +643,7 @@ def main():
             print(param_group['lr'])
 
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
-                
+        
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
         
         scheduler.step(valid_loss)

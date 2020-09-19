@@ -4,9 +4,16 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import pytorch_model_summary
 from torchsummary import summary
-from utils import checkValidConvolution, valid_length, memory_check
 
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir) 
+
+from utils import checkValidConvolution, valid_length, memory_check
+import time_transform_posteriograms
 import normalization
+import tf_transforms
 
 import torchsnooper
 # The temporal block preserves the length of the signal received as input

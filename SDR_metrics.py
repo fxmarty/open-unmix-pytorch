@@ -2,45 +2,6 @@ import torch
 import math
 import numpy as np
 
-def sisdr(estimates, targets,eps=0,scale_invariant=True):
-    """
-    calculate training loss
-    input:
-          estimates: separated signals, (batch_size,nb_channels,nb_samples) tensor
-          targets: reference signals, (batch_size,nb_channels,nb_samples) tensor
-    Return:
-          sisdr: SI-SDR mean over all samples in a batch
-    """
-
-    if estimates.shape != targets.shape:
-        raise RuntimeError(
-            "Dimention mismatch when calculate si-snr, {} vs {}".format(
-                estimates.shape, targets.shape))
-        
-    if len(estimates.shape) == 2: # add batch dimension
-        estimates = estimates[None,...]
-        targets = targets[None,...]
-    
-    if scale_invariant == True:
-        # scaling [batch_size,nb_channels,1]
-        scaling = torch.sum(estimates * targets, dim=-1,keepdim=True) / (torch.sum(targets * targets, dim=-1, keepdim=True) + eps) # to discuss
-    else:
-        scaling = 1
-
-    # e_target [batch_size,nb_channels,nb_samples]
-    e_target = scaling * targets
-    
-    e_residual = estimates - e_target
-    
-    # Starg [batch_size,nb_channels,1]
-    Starg= torch.sum(e_target**2,dim=-1,keepdim=True)
-    Sres= torch.sum(e_residual**2,dim=-1,keepdim=True)
-    
-    # SI_SDR [batch_size,nb_channels,1]
-    SI_SDR = - 10*torch.log10(Starg/(eps+Sres) + eps)
-
-    return torch.mean(SI_SDR) # return mean over all samples in a batch
-
 def sisdr_framewise(estimates, targets, sample_rate,eps=1e-8,scale_invariant=True):
     """
     input:
@@ -75,14 +36,12 @@ def sisdr_framewise(estimates, targets, sample_rate,eps=1e-8,scale_invariant=Tru
     
     if scale_invariant == True:
         # scaling [batch_size,nb_channels,number of seconds,1]
-        scaling = torch.sum(estimates_reshaped * targets_reshaped, dim=-1,keepdim=True) / (torch.sum(targets_reshaped * targets_reshaped, dim=-1, keepdim=True) + eps) # to discuss
+        scaling = torch.sum(estimates_reshaped * targets_reshaped, dim=-1,keepdim=True) / (torch.sum(targets_reshaped * targets_reshaped, dim=-1, keepdim=True) + eps)
+        e_target = scaling * targets_reshaped
     else:
-        scaling = 1
-    
+        e_target = targets_reshaped
     # e_target [batch_size,1,number of seconds,sample rate]
-    e_target = scaling * targets_reshaped
     
-    #e_target = targets
     e_residual = estimates_reshaped - e_target
     
     # Starg [batch_size,number of seconds,1]
@@ -92,11 +51,33 @@ def sisdr_framewise(estimates, targets, sample_rate,eps=1e-8,scale_invariant=Tru
     # SI_SDR [batch_size,nb_channels,number of seconds]
     SI_SDR = - 10*torch.log10(Starg/(eps+Sres) + eps)
     
-    if eps == 0:
-        SI_SDR = SI_SDR[torch.isfinite(SI_SDR)]
-    
-    return torch.mean(SI_SDR) # return mean over all samples in a batch and channels
+    return SI_SDR
 
+def ideal_SDR_framewise(estimates, targets, sample_rate):
+    torch_factor_ideal = torch.sum(estimates*targets,dim=-1)/torch.sum(estimates*estimates,dim=-1)
+    torch_factor_ideal = torch.unsqueeze(torch_factor_ideal,dim=-1)
+    
+    torch_estimate_ideal = torch_factor_ideal * estimates
+
+    return sisdr_framewise(torch_estimate_ideal, targets,
+                        sample_rate,scale_invariant=False,eps=0)
+    
+def loss_SI_SDR(SI_SDR_framewise,eps=1e-8):
+    if eps == 0:
+        SI_SDR_finite = SI_SDR_framewise[torch.isfinite(SI_SDR_framewise)]
+    else:
+        SI_SDR_finite = SI_SDR_framewise
+    # return mean over all samples in a batch and channels
+    return torch.mean(SI_SDR_finite) 
+
+def metric_SI_SDR(SI_SDR_framewise,eps=1e-8):
+    if eps == 0:
+        SI_SDR_finite = SI_SDR_framewise[torch.isfinite(SI_SDR_framewise)]
+    else:
+        SI_SDR_finite = SI_SDR_framewise
+    
+    # return mean over all samples in a batch and channels
+    return np.median(SI_SDR_finite.numpy()) 
 
 if __name__ == '__main__':
     import torchaudio
@@ -107,39 +88,40 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     
-    mixture, sample_rate = torchaudio.load('convtasnet_1_0mixture.wav')
-    target, sample_rate = torchaudio.load('convtasnet_1_0target.wav')
-    estimate,sample_rate = torchaudio.load('convtasnet_300_0estimate.wav')    
+    target, sample_rate = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18_16000wav/test/AM Contra - Heart Peripheral/mixture.wav')
+    estimate,sample_rate = torchaudio.load('/tsi/doctorants/fmarty/executedJobs/09-14_CTNbaselineJoint/outDir/test/AM Contra - Heart Peripheral/vocals.wav')    
 
-    target = np.array(target)
-    estimate = np.array(estimate)
+    target = np.array(target)[:,10*16000:40*16000]
+    estimate = np.array(estimate)[:,10*16000:40*16000]
     
+    #target = target[None,...]
+    #estimate = estimate[None,...]
     
-    sr = 44100
+    #print(target.shape)
+    sr = 16000
     
     #torch.manual_seed(7)
     
-    #estimate = 4*torch.rand(1, 12*44100)-2
-    #target = 4*torch.rand(1, 12*44100)-2
+    #estimate = 4*torch.rand(1, 24*44100)-2
+    #target = 4*torch.rand(1, 24*44100)-2
+    
+    #estimate = estimate.numpy()
+    #target = target.numpy()
     
     """
-    estimate = np.zeros((1,12*44100))
-    target = np.zeros((1,12*44100))
+    estimate = np.zeros((1,60*44100))
+    target = np.zeros((1,60*44100))
     
-    for i in range(12*44100):
+    for i in range(60*44100):
         estimate[0][i] = 0.4*np.sin(i*0.1)+0.2
-        target[0][i] = np.sin(i*0.1)
+        target[0][i] = estimate[0][i] + 5*random.random()
     """
-    #scaling = torch.sum(estimate * target, dim=-1,keepdim=True) / (torch.sum(target * target, dim=-1, keepdim=True))
-    #target = scaling * target
-    
-    #print("-------Original SI-SNR:",sisdr(estimate,target))
-    #print("-------New SI-SNR:",sisdr_framewise(estimate,target,sample_rate=sr))
-    
+        
     estimate_1 = estimate
     estimate_0_5 = 0.5*estimate
     estimate_4 = 4*estimate
         
+    
     sdr_1_museval = museval.evaluate(target,estimate_1,win=sr, hop=sr)[0]
     sdr_0_5_museval = museval.evaluate(target,estimate_0_5,
                         win=sr, hop=sr)[0]
@@ -149,6 +131,7 @@ if __name__ == '__main__':
     print("SDR museval estimate*0.5:",np.median(sdr_0_5_museval))
     print("SDR museval estimate*4:",np.median(sdr_4_museval))
     print("----")
+    
     sdr_1_museval_v3 = museval.evaluate(target,estimate_1,
                         win=sr, hop=sr,mode='v3')[0]
     sdr_0_5_museval_v3 = museval.evaluate(target,estimate_0_5,
@@ -195,29 +178,47 @@ if __name__ == '__main__':
     torch_estimate_0_5 = torch.from_numpy(estimate_0_5)
     torch_estimate_4 = torch.from_numpy(estimate_4)
     torch_target = torch.from_numpy(target)
-    
-    
-    sdr_1_mine = sisdr_framewise(torch_estimate_1, torch_target,
-                        sr,scale_invariant=False)
-    sdr_0_5_mine = sisdr_framewise(torch_estimate_0_5,
-                        torch_target, sr,scale_invariant=False)
-    sdr_4_mine = sisdr_framewise(torch_estimate_4, torch_target,
-                        sr,scale_invariant=False)
     torch.set_printoptions(precision=10)
+    
+    sdr_1_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_1, torch_target,
+                        sr,scale_invariant=False,eps=0),eps=0)
+    sdr_0_5_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_0_5,
+                        torch_target, sr,scale_invariant=False,eps=0),eps=0)
+    sdr_4_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_4, torch_target,
+                        sr,scale_invariant=False,eps=0),eps=0)
+    sdr_ideal_mine = -metric_SI_SDR(ideal_SDR_framewise(torch_estimate_1, torch_target, sr),eps=0)
+    
     print("SDR estimate*1 mine:",sdr_1_mine)
     print("SDR estimate*0.5 mine:",sdr_0_5_mine)
     print("SDR estimate*4 mine:",sdr_4_mine)
+    print("SDR ideal mine:",sdr_ideal_mine)
     print("----")
     
-    si_sdr_1_mine = sisdr_framewise(torch_estimate_1, torch_target,
-                        sr,scale_invariant=True)
-    si_sdr_0_5_mine = sisdr_framewise(torch_estimate_0_5,
-                        torch_target, sr,scale_invariant=True)
-    si_sdr_4_mine = sisdr_framewise(torch_estimate_4, torch_target,
-                        sr,scale_invariant=True)
+    si_sdr_1_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_1, torch_target,
+                        sr,scale_invariant=True,eps=0),eps=0)
+    si_sdr_0_5_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_0_5,
+                        torch_target, sr,scale_invariant=True,eps=0),eps=0)
+    si_sdr_4_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_4, torch_target,
+                        sr,scale_invariant=True,eps=0),eps=0)
 
     print("SDR estimate*1 mine:",si_sdr_1_mine)
     print("SDR estimate*0.5 mine:",si_sdr_0_5_mine)
     print("SDR estimate*4 mine:",si_sdr_4_mine)
-
     
+    
+    
+    target_44100, sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18wav/train/Music Delta - Britpop/vocals.wav')
+    mixture_44100,sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18wav/train/Music Delta - Britpop/mixture.wav')
+    
+    target_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18_16000wav/train/Music Delta - Britpop/mixture.wav')
+    mixture_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18_16000wav/train/Music Delta - Britpop/vocals.wav')
+    
+    si_sdr_44100_mine = -metric_SI_SDR(sisdr_framewise(mixture_44100, target_44100,
+                        sample_rate_1,scale_invariant=True,eps=0),eps=0)
+                        
+    si_sdr_16000_mine = -metric_SI_SDR(sisdr_framewise(mixture_16000, target_16000,
+                        sample_rate_2,scale_invariant=True,eps=0),eps=0)
+    
+    print("---")
+    print("SI-SDR at 44100 Hz:",si_sdr_44100_mine)
+    print("SI-SDR at 16000 Hz:",si_sdr_16000_mine)
