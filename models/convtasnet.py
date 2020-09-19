@@ -11,7 +11,6 @@ parentdir = os.path.dirname(currentdir)
 sys.path.insert(0,parentdir) 
 
 from utils import checkValidConvolution, valid_length, memory_check
-import time_transform_posteriograms
 import normalization
 import tf_transforms
 
