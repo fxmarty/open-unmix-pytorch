@@ -8,9 +8,7 @@ from pathlib import Path
 import scipy.signal
 import resampy
 
-import model
-import deep_u_net
-import convtasnet
+from models import open_unmix
 
 import utils
 import warnings
@@ -47,7 +45,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
         # than the bandwidth indicated in the .json files
 
         if results['args']['modelname'] == 'open-unmix':
-            unmix = model.OpenUnmix(
+            unmix = open_unmix.OpenUnmix(
                 normalization_style=results['args']['normalization_style'],
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
@@ -71,7 +69,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 normalization_style=results['args']['normalization_style'],
                 nb_channels=results['args']['nb_channels'],
                 sample_rate=16000,
-                C=2
+                C=2 if results['args']['joint'] else 1
             )
             
             
@@ -79,7 +77,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
         unmix.eval()
         unmix.to(device)
             
-        return unmix,results['args']['modelname'],results['args']['nb_channels']
+        return unmix,results
 
 
 def istft(X, rate=44100, n_fft=4096, n_hopsize=1024):
@@ -151,11 +149,14 @@ def separate(
         V = []
         
         for j, target in enumerate(tqdm.tqdm(targets)): # tqdm for progress bar
-            unmix_target,modelname,nb_channels_model = load_model(
+            unmix_target,args = load_model(
                 target=target,
                 model_name=model_name,
                 device=device
             )
+            
+            modelname = args['args']['modelname']
+            nb_channels_model = args['args']['nb_channels']
             
             # If the model takes mono as input, put the channels in the number of samples dim
             if nb_channels_model == 1: 
@@ -172,6 +173,8 @@ def separate(
                     Vj = Vj.transpose(2,1,0,3)
                     # out [1, C, nb_channels, nb_timesteps]
             
+            source_names += [target]
+            
             if modelname in ('open-unmix', 'deep-u-net') and softmask:
                 # only exponentiate the model if we use softmask
                 Vj = Vj**alpha
@@ -181,8 +184,9 @@ def separate(
                 V.append(Vj[:, 0, ...])  # remove sample dim
             if modelname in ('convtasnet'):
                 V.append(Vj[0,0].T/np.max(np.abs(Vj[0,0]))) # voice
-                V.append(Vj[0,1].T/np.max(np.abs(Vj[0,1]))) # accompaniment
-            source_names += [target]
+                if args['args']['joint']:
+                    source_names.append('accompaniment')
+                    V.append(Vj[0,1].T/np.max(np.abs(Vj[0,1]))) # accompaniment
         
         
         estimates = {}
@@ -215,7 +219,6 @@ def separate(
                     n_hopsize=unmix_target.stft.n_hop
                 )
                 estimates[name] = audio_hat.T
-                print("estimate shape:",estimates[name].shape)
         
         if modelname == 'deep-u-net': # without wiener filtering
             phase_audio = np.angle(X)[...,np.newaxis]
@@ -230,7 +233,6 @@ def separate(
                 estimates[name] = audio_hat.T
         
         if modelname == 'convtasnet':
-            source_names.append('accompaniment')
             for j, name in enumerate(source_names):
                 estimates[name] = V[j]
         

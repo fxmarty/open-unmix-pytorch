@@ -5,9 +5,14 @@ import torch.nn.functional as F
 import pytorch_model_summary
 from torchsummary import summary
 
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir) 
+
+import time_transform_posteriograms
 import normalization
 import tf_transforms
-import timeTransformPosteriograms
 
 class OpenUnmix(nn.Module):
     def __init__(
@@ -26,7 +31,7 @@ class OpenUnmix(nn.Module):
         max_bin=None,
         unidirectional=False,
         power=1,
-        phonemeNumber = 64 # to modify
+        number_of_phonemes = 64 # to modify
     ):
         """
         Input:
@@ -112,7 +117,7 @@ class OpenUnmix(nn.Module):
         )
         
         # phoneme processing
-        self.fc1Phoneme = Linear(phonemeNumber, phoneme_hidden_size)
+        self.fc1Phoneme = Linear(number_of_phonemes, phoneme_hidden_size)
         
         self.lstmPhoneme = LSTM(
             input_size=phoneme_hidden_size,
@@ -129,10 +134,7 @@ class OpenUnmix(nn.Module):
         # and reduce feature dimensions, therefore we reshape
         x = self.transform(x)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
-        
-        #print(x.shape)
-        #print(phoneme.shape)
-        
+                
         #out [nb_samples, nb_frames, nb_phonemes])
         phoneme = timeTransformPosteriograms.timeTransform(phoneme,nb_frames,0.016,
                                 self.fft_window_duration,self.fft_hop_duration)

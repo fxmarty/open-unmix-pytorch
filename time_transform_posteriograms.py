@@ -19,14 +19,12 @@ def timeTransform(phoneme,nb_fft_frames,phoneme_hop,fft_window,fft_hop):
         # The "1 +" comes from the definition of phonemeStartFrame
         phonemeStartFrame = math.floor(start_time/phoneme_hop) + 1
         phonemeEndFrame = math.floor(end_time/phoneme_hop) + 1
-                
+        
         beta_left = (phonemeStartFrame + 1)*phoneme_hop - start_time
         beta_left = beta_left / fft_window
-                
+        
         beta_right = end_time - phonemeEndFrame*phoneme_hop
         beta_right = beta_right / fft_window
-        
-        #nb_alpha = math.floor(((1 - beta_left) * fft_window) / phoneme_hop)
         
         weight_matrix[i][phonemeStartFrame - 1] = beta_left/2
         weight_matrix[i][phonemeStartFrame] = beta_left/2 + alpha/2
@@ -37,8 +35,8 @@ def timeTransform(phoneme,nb_fft_frames,phoneme_hop,fft_window,fft_hop):
         #print(i,nb_fft_frames,phonemeEndFrame)
         #print(nb_phoneme_frames)
         #print(torch.sum(weight_matrix[i]))
-    #output shape [batch_size, nb_channels,nb_fft_frames, nb_phonemes]
     
+    #output shape [batch_size, nb_channels,nb_fft_frames, nb_phonemes]
     return torch.matmul(weight_matrix,phoneme)
 
 if __name__ == '__main__':

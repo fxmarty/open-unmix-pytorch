@@ -57,8 +57,7 @@ def load_datasets(parser, args):
             'is_wav': args.is_wav,
             'subsets': 'train',
             'target': args.target,
-            'download': args.root is None,
-            'random_chunks': args.random_chunks
+            'download': args.root is None
         }
 
         source_augmentations = Compose(
@@ -111,7 +110,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         random_track_mix=False,
         dtype=torch.float32,
         data_augmentation="yes",
-        random_chunks=True,
         nb_channels=2,
         *args, **kwargs
     ):
@@ -146,8 +144,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         random_track_mix : boolean
             randomly mixes sources from different tracks to assemble a
             custom mix. This augmenation is only applied for the train subset.
-        random_chunks : boolean
-            boolean defining if chunks for the tracks will be choosed randomly or not
         dtype : numeric type
             data type of torch output tuple x and y
         args, kwargs : additional keyword arguments
@@ -161,9 +157,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         self.modelname = modelname
         self.joint = joint
         self.is_wav = is_wav
-        # Sequence duration is taken to be a a multiple of the phoneme hop
-        if split == 'train':
-            self.seq_duration = math.ceil(seq_duration/self.phoneme_hop)*self.phoneme_hop
+        self.seq_duration = seq_duration
         self.target = target
         self.subsets = subsets
         self.split = split
@@ -171,7 +165,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         self.source_augmentations = source_augmentations
         self.random_track_mix = random_track_mix
         self.data_augmentation = data_augmentation
-        self.random_chunks = random_chunks
         self.nb_channels = nb_channels
         self.mus = musdb.DB(
             root=root,
@@ -191,13 +184,13 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         
         self.dtype = dtype
         
-        if self.data_augmentation == 'no': # save tracks numbers
+        if self.data_augmentation == False: # save tracks numbers
             self.dataindex = torch.zeros(len(self.mus),self.samples_per_track)
             for i in range(len(self.mus)):
                 track = self.mus.tracks[i]
                 for j in range(self.samples_per_track):
                     chunk_start = math.floor(random.uniform(
-                        0.017, track.duration - self.seq_duration)
+                        0.016, min(track.duration,600) - self.seq_duration)
                         / self.phoneme_hop) * self.phoneme_hop
                     
                     self.dataindex[i][j] = chunk_start
@@ -218,22 +211,22 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         # at training time we assemble a custom mix
         if self.split == 'train' and self.seq_duration:
             for k, source in enumerate(self.mus.setup['sources']):
-                # select a random track if data augmentation
-                if self.random_track_mix and self.data_augmentation == 'yes':
-                    track = random.choice(self.mus.tracks)
-                
                 # memorize index of target source
                 if source == self.target:
                     target_ind = k
+                
+                # select a random track if data augmentation
+                if self.random_track_mix and self.data_augmentation:
+                    track = random.choice(self.mus.tracks)
                 
                 # set the excerpt duration
                 track.chunk_duration = self.seq_duration
                 
                 # set random start position if data augmentation
                 # have start time synchronized with phoneme window
-                if self.random_chunks:
-                    track.chunk_start = chunk_start = math.floor(random.uniform(
-                        0.017, track.duration - self.seq_duration)
+                if self.data_augmentation:
+                    track.chunk_start = math.floor(random.uniform(
+                        0.016, min(track.duration,600) - self.seq_duration - 0.032)
                         / self.phoneme_hop) * self.phoneme_hop
                 else:
                     track.chunk_start = self.dataindex[index // self.samples_per_track][index % self.samples_per_track].item()
@@ -244,7 +237,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     phoneme = np.load(self.root_phoneme+'/'
                                     +self.split+'_'+track.name+'.npy',
                                 mmap_mode='r+')
-
+                    
                     startFrame = math.floor(track.chunk_start/self.phoneme_hop - 1)
                     nbFrameDuration = math.floor(track.chunk_duration
                                 /self.phoneme_hop) + 2
@@ -261,12 +254,12 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 if self.modelname == 'deep-u-net':
                     audio = audio[...,:98560] # for testing purpose, 128 frames
                                 
-                if self.data_augmentation == 'yes':
+                if self.data_augmentation:
                     audio = self.source_augmentations(audio)
                 
                 if self.nb_channels == 1: # select randomly left or right channel
                     channel_number = 0
-                    if self.random_chunks: channel_number = random.randint(0, 1) 
+                    if self.data_augmentation: channel_number = random.randint(0, 1) 
                     audio = torch.unsqueeze(audio[channel_number],0)
                 
                 audio_sources.append(audio)
@@ -291,6 +284,9 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
         else:
+            track.chunk_start = 0.016
+            track.chunk_duration = min(track.duration,600) - track.chunk_start - 0.032
+            
             # get the non-linear source mix straight from musdb
             x = torch.tensor(
                 track.audio.T,
@@ -302,10 +298,11 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
             )
             
             phoneme = np.load(self.root_phoneme+'/'
-                                    +self.split+'_'+track.name+'.npy')
+                                    +'train'+'_'+track.name+'.npy')
             phoneme = torch.from_numpy(phoneme)
             
-            if self.nb_channels == 1: # select left or right depending on index even or not
+            # select left or right depending on index even or not
+            if self.nb_channels == 1: 
                 x = torch.unsqueeze(x[index%2],0)
                 y = torch.unsqueeze(y[index%2],0)
             # if nb_channels = 2, use both channels
