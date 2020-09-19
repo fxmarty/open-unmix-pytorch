@@ -75,6 +75,7 @@ def load_datasets(parser, args):
             nb_channels=args.nb_channels,
             root_phoneme = args.root_phoneme,
             joint=args.joint,
+            fake=args.fake,
             **dataset_kwargs
         )
 
@@ -87,6 +88,7 @@ def load_datasets(parser, args):
             nb_channels=args.nb_channels,
             root_phoneme = args.root_phoneme,
             joint=args.joint,
+            fake=args.fake,
             **dataset_kwargs
         )
 
@@ -111,6 +113,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         dtype=torch.float32,
         data_augmentation="yes",
         nb_channels=2,
+        fake=False,
         *args, **kwargs
     ):
         """MUSDB18 torch.data.Dataset that samples from the MUSDB tracks
@@ -175,6 +178,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
             *args, **kwargs
         )
         self.root_phoneme = root_phoneme
+        self.fake = fake
         
         if len(self.mus.tracks) > 0:
             self.sample_rate = self.mus.tracks[0].rate
@@ -244,6 +248,11 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     phoneme = phoneme[startFrame:startFrame
                                 + nbFrameDuration,:]
                     phoneme = torch.from_numpy(phoneme)
+                    
+                    if self.fake:
+                        phoneme = torch.zeros(phoneme.shape)
+                        phoneme[...,0] = 1
+                    
                 
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
@@ -300,6 +309,10 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
             phoneme = np.load(self.root_phoneme+'/'
                                     +'train'+'_'+track.name+'.npy')
             phoneme = torch.from_numpy(phoneme)
+            
+            if self.fake:
+                phoneme = torch.zeros(phoneme.shape)
+                phoneme[...,0] = 1
             
             # select left or right depending on index even or not
             if self.nb_channels == 1: 

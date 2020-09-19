@@ -311,6 +311,10 @@ def main():
                         action='store_true',
                         help='Train jointly for vocals and accompaniment (convtasnet)')
     
+    parser.add_argument('--fake',
+                        action='store_true',
+                        help='Input fake constant phoneme')
+    
     args, _ = parser.parse_known_args()
     
     # Make normalization-style argument not mendatory
@@ -432,6 +436,7 @@ def main():
         scaler_std = None
     else:
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
+        #scaler_mean, scaler_std = None,None
         
     if args.modelname == 'open-unmix':
         unmix = open_unmix.OpenUnmix(
