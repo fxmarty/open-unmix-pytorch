@@ -46,13 +46,13 @@ def evalTargets(joint,args,device):
         
         if args.outdir:
             mus.save_estimates(estimates, track, args.outdir)
-
+        
         vocals = torch.from_numpy(track.targets['vocals'].audio.T)
         estimated_vocals = torch.from_numpy(estimates['vocals'].T)
         
         if vocals.shape != estimated_vocals.shape:
             raise ValueError("Targets and estimates should have the same shape!")
-
+        
         vocals_SISDR = sisdr_framewise(estimated_vocals,vocals,
                                         sample_rate=track.rate,eps=0)
         vocals_SDR = ideal_SDR_framewise(estimated_vocals,vocals,sample_rate=track.rate)

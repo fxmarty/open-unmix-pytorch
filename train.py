@@ -290,6 +290,7 @@ def get_statistics(args, dataset):
     dataset_scaler.random_track_mix = False
     dataset_scaler.random_interferer_mix = False
     dataset_scaler.seq_duration = None
+    
     pbar = tqdm.tqdm(range(len(dataset_scaler)), disable=args.quiet)
     for ind in pbar:
         x, y = dataset_scaler[ind]
@@ -397,6 +398,23 @@ def main():
                         action='store_true',
                         help='Train jointly for vocals and accompaniment (convtasnet)')
     
+    parser.add_argument('--no-random-track-mix',
+                        action='store_false',
+                        help='Disable random track selection for each target in the dataset')
+    
+    parser.add_argument('--no-random-chunk-start',
+                        action='store_false',
+                        help='Disable random chunk start for each target in the dataset')
+
+    parser.add_argument('--no-source-augmentation',
+                        action='store_false',
+                        help='Disable source augmentation for each target in the dataset')
+
+    parser.add_argument('--no-random-channel',
+                        action='store_false',
+                        help='Disable random channel selection for each target in the dataset')
+
+    
     args, _ = parser.parse_known_args()
     
     # Make normalization-style argument not mendatory
@@ -452,10 +470,7 @@ def main():
 
     if args.modelname == 'deep-u-net':
         print("WARNING: Be warned that the sequence length may have been overridden.")
-    
-    if args.data_augmentation == False:
-        print("WARNING: Data augmentation has been disabled.")
-    
+        
     print("Sampling rate of dataset:",train_dataset.sample_rate,"Hz")
     print("Size validation set:",len(valid_dataset),"(",len(valid_dataset.mus.tracks),
             "*",valid_dataset.samples_per_track,", number of tracks * samples per track)")

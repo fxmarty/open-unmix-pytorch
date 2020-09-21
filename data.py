@@ -70,8 +70,10 @@ def load_datasets(parser, args):
             samples_per_track=args.samples_per_track,
             seq_duration=args.seq_dur,
             source_augmentations=source_augmentations,
-            random_track_mix=True,
-            data_augmentation=args.data_augmentation,
+            random_track_mix=args.no_random_track_mix,
+            random_chunk_start=args.no_random_chunk_start,
+            augment_sources=args.no_source_augmentation,
+            random_channel=args.no_random_channel,
             nb_channels=args.nb_channels,
             joint=args.joint,
             **dataset_kwargs
@@ -104,8 +106,10 @@ class MUSDBDataset(torch.utils.data.Dataset):
         samples_per_track=64,
         source_augmentations=lambda audio: audio,
         random_track_mix=False,
+        random_chunk_start=False,
+        augment_sources=False,
+        random_channel=False,
         dtype=torch.float32,
-        data_augmentation="yes",
         nb_channels=2,
         *args, **kwargs
     ):
@@ -158,8 +162,12 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.split = split
         self.samples_per_track = samples_per_track
         self.source_augmentations = source_augmentations
+        
         self.random_track_mix = random_track_mix
-        self.data_augmentation = data_augmentation
+        self.random_chunk_start = random_chunk_start
+        self.augment_sources = augment_sources
+        self.random_channel = random_channel
+        
         self.nb_channels = nb_channels
         self.mus = musdb.DB(
             root=root,
@@ -178,7 +186,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         
         self.dtype = dtype
         
-        if self.data_augmentation == False: # save tracks numbers
+        if self.random_chunk_start == False and self.split == 'train': # save tracks numbers
             self.dataindex = torch.zeros(len(self.mus),self.samples_per_track)
             for i in range(len(self.mus)):
                 track = self.mus.tracks[i]
@@ -209,14 +217,14 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     target_ind = k
                 
                 # select a random track if data augmentation
-                if self.random_track_mix and self.data_augmentation:
+                if self.random_track_mix:
                     track = random.choice(self.mus.tracks)
                 
                 # set the excerpt duration
                 track.chunk_duration = self.seq_duration
                 
                 # set random start position if data augmentation
-                if self.data_augmentation:
+                if self.random_chunk_start:
                     track.chunk_start = math.floor(random.uniform(
                         0.016, min(track.duration,600) - self.seq_duration - 0.032)
                         / self.phoneme_hop) * self.phoneme_hop
@@ -232,12 +240,12 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 if self.modelname == 'deep-u-net':
                     audio = audio[...,:98560] # for testing purpose, 128 frames
                                 
-                if self.data_augmentation:
+                if self.augment_sources:
                     audio = self.source_augmentations(audio)
                 
                 if self.nb_channels == 1: # select randomly left or right channel
                     channel_number = 0
-                    if self.data_augmentation: channel_number = random.randint(0, 1) 
+                    if self.random_channel: channel_number = random.randint(0, 1) 
                     audio = torch.unsqueeze(audio[channel_number],0)
                 
                 audio_sources.append(audio)
