@@ -137,7 +137,8 @@ class OpenUnmix(nn.Module):
                 
         #out [nb_samples, nb_frames, nb_phonemes])
         phoneme = time_transform_posteriograms.timeTransform(phoneme,nb_frames,0.016,
-                                self.fft_window_duration,self.fft_hop_duration)
+                                self.fft_window_duration,self.fft_hop_duration,
+                                center=self.stft.center)
         
         phoneme = F.relu(self.fc1Phoneme(phoneme))
         phoneme = F.relu(self.lstmPhoneme(phoneme)[0])

@@ -292,12 +292,6 @@ def main():
     )
     
     parser.add_argument(
-        '--data-augmentation','--data_augmentation',
-        action='store_true',
-        help='Change data generation to allow data augmentation between epochs or not'
-    )
-    
-    parser.add_argument(
         '--normalization-style','--normalization_style',
         choices=['overall', 'batch-specific','none'],
         type=str,
@@ -314,6 +308,22 @@ def main():
     parser.add_argument('--fake',
                         action='store_true',
                         help='Input fake constant phoneme')
+    
+    parser.add_argument('--no-random-track-mix',
+                        action='store_false',
+                        help='Disable random track selection for each target in the dataset')
+    
+    parser.add_argument('--no-random-chunk-start',
+                        action='store_false',
+                        help='Disable random chunk start for each target in the dataset')
+
+    parser.add_argument('--no-source-augmentation',
+                        action='store_false',
+                        help='Disable source augmentation for each target in the dataset')
+
+    parser.add_argument('--no-random-channel',
+                        action='store_false',
+                        help='Disable random channel selection for each target in the dataset')
     
     args, _ = parser.parse_known_args()
     
@@ -370,10 +380,7 @@ def main():
 
     if args.modelname == 'deep-u-net':
         print("WARNING: Be warned that the sequence length may have been overridden.")
-    
-    if args.data_augmentation == False:
-        print("WARNING: Data augmentation has been disabled.")
-    
+        
     print("Sampling rate of dataset:",train_dataset.sample_rate,"Hz")
     print("Size validation set:",len(valid_dataset),"(",len(valid_dataset.mus.tracks),
             "*",valid_dataset.samples_per_track,", number of tracks * samples per track)")
