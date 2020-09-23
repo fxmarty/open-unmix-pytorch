@@ -379,12 +379,6 @@ def main():
     )
     
     parser.add_argument(
-        '--data-augmentation','--data_augmentation',
-        action='store_true',
-        help='Change data generation to allow data augmentation between epochs or not'
-    )
-    
-    parser.add_argument(
         '--normalization-style','--normalization_style',
         choices=['overall', 'batch-specific','none'],
         type=str,
