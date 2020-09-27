@@ -86,7 +86,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     
-    target, sample_rate = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18_16000wav/test/AM Contra - Heart Peripheral/mixture.wav')
+    target, sample_rate = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/test/AM Contra - Heart Peripheral/mixture.wav')
     estimate,sample_rate = torchaudio.load('/tsi/doctorants/fmarty/executedJobs/09-14_CTNbaselineJoint/outDir/test/AM Contra - Heart Peripheral/vocals.wav')    
 
     target = np.array(target)[:,10*16000:40*16000]
@@ -205,11 +205,11 @@ if __name__ == '__main__':
     
     
     
-    target_44100, sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18wav/train/Music Delta - Britpop/vocals.wav')
-    mixture_44100,sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18wav/train/Music Delta - Britpop/mixture.wav')
+    target_44100, sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18wav/train/Music Delta - Britpop/vocals.wav')
+    mixture_44100,sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18wav/train/Music Delta - Britpop/mixture.wav')
     
-    target_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18_16000wav/train/Music Delta - Britpop/mixture.wav')
-    mixture_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/MUSDB18_16000wav/train/Music Delta - Britpop/vocals.wav')
+    target_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/train/Music Delta - Britpop/mixture.wav')
+    mixture_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/train/Music Delta - Britpop/vocals.wav')
     
     si_sdr_44100_mine = -metric_SI_SDR(sisdr_framewise(mixture_44100, target_44100,
                         sample_rate_1,scale_invariant=True,eps=0),eps=0)

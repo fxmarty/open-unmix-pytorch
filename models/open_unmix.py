@@ -140,6 +140,7 @@ class OpenUnmix(nn.Module):
         x = torch.cat([x, lstm_out[0]], -1)
 
         # first dense stage + batch norm
+        #input to fc2 [nb_frames*nb_samples, 2*hidden_size]
         x = self.fc2(x.reshape(-1, x.shape[-1]))
         x = self.bn2(x)
 

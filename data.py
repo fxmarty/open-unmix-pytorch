@@ -192,7 +192,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 track = self.mus.tracks[i]
                 for j in range(self.samples_per_track):
                     chunk_start = math.floor(random.uniform(
-                        0.016, min(track.duration,600) - self.seq_duration)
+                        0, min(track.duration,600) - self.seq_duration - 0.016)
                         / self.phoneme_hop) * self.phoneme_hop
                     self.dataindex[i][j] = chunk_start
                     
@@ -226,7 +226,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 # set random start position if data augmentation
                 if self.random_chunk_start:
                     track.chunk_start = math.floor(random.uniform(
-                        0.016, min(track.duration,600) - self.seq_duration - 0.032)
+                        0, min(track.duration,600) - self.seq_duration - 0.016)
                         / self.phoneme_hop) * self.phoneme_hop
                 else:
                     track.chunk_start = self.dataindex[index // self.samples_per_track][index % self.samples_per_track].item()
@@ -269,8 +269,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
         else:
-            track.chunk_start = 0.016
-            track.chunk_duration = min(track.duration,600) - track.chunk_start - 0.032
+            track.chunk_duration = min(track.duration,600)
             
             # get the non-linear source mix straight from musdb
             x = torch.tensor(

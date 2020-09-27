@@ -527,7 +527,8 @@ def main():
         scaler_std = None
     else:
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
-        
+        #scaler_mean, scaler_std = None,None
+    
     if args.modelname == 'open-unmix':
         unmix = open_unmix.OpenUnmix(
             normalization_style=args.normalization_style,
@@ -652,7 +653,6 @@ def main():
             print(param_group['lr'])
 
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
-        
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
         
         scheduler.step(valid_loss)

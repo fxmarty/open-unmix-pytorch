@@ -45,7 +45,7 @@ class TemporalBlock(nn.Module):
                                    stride=stride,
                                    padding=padding,
                                    dilation=dilation,
-                                   groups=in_channels
+                                   groups=hidden_channels
                                    )
         
         self.nonlinearity2 = nn.PReLU()
@@ -177,8 +177,8 @@ class ConvTasNet(nn.Module):
         
         pad_aux_left = torch.zeros(batch_size,nb_channels,padding_size//2).to(input.device)
         pad_aux_right = torch.zeros(batch_size,nb_channels,padding_size - padding_size//2).to(input.device)
-        outut = torch.cat([pad_aux_left, input, pad_aux_right], 2)
-        return outut, padding_size
+        output = torch.cat([pad_aux_left, input, pad_aux_right], 2)
+        return output, padding_size
     
     
     def forward(self, x):
@@ -200,9 +200,7 @@ class ConvTasNet(nn.Module):
         
         #checkValidConvolution(x.size(2),kernel_size=1)
         x = self.bottleneck_conv1x1(x) #output [nb_samples, B, hidden_size]
-        #print("xshape:",x.shape)
-        
-        #skip_connection = torch.zeros(x.shape,requires_grad=x.requires_grad).to(x.device)
+
         skip_connection = 0.
         i = 1
         for repeat in self.repeats:
