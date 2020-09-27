@@ -447,8 +447,8 @@ def main():
         scaler_mean = None
         scaler_std = None
     else:
-        #scaler_mean, scaler_std = get_statistics(args, train_dataset)
-        scaler_mean, scaler_std = None,None
+        scaler_mean, scaler_std = get_statistics(args, train_dataset)
+        #scaler_mean, scaler_std = None,None
         
     if args.modelname == 'open-unmix':
         unmix = open_unmix.OpenUnmix(
