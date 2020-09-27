@@ -206,11 +206,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 track = self.mus.tracks[i]
                 for j in range(self.samples_per_track):
                     chunk_start = math.floor(random.uniform(
-<<<<<<< HEAD
                         0, min(track.duration,600) - self.seq_duration - 0.016)
-=======
-                        0, min(track.duration,600) - self.seq_duration)
->>>>>>> bb268f3f9897a6f80855d711487a90676615a002
                         / self.phoneme_hop) * self.phoneme_hop
                     
                     self.dataindex[i][j] = chunk_start
