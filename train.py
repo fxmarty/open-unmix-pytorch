@@ -1,6 +1,7 @@
 import argparse
 
 from models import open_unmix
+from models import convtasnet
 
 import data
 import utils
@@ -116,7 +117,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         
         if model_name_general == 'convtasnet':
             y_hat = unmix(x,phoneme)
-
+            
             loss = 0
             for j in range(y.shape[1]): # add up SI-SNR for the different estimates
                 loss = loss + loss_SI_SDR(sisdr_framewise(y_hat[:,j,...],y[:,j,...],
@@ -124,11 +125,11 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
             
             torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
             losses.update(loss.item(), x.size(0))
-        
+            
         i = i + 1
         loss.backward()
-        
         optimizer.step()
+
         try:
             del y_hat
         except: 
@@ -139,6 +140,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
             pass
         del x
         del y
+        del phoneme
         torch.cuda.empty_cache()
     
     return losses.avg
@@ -216,7 +218,6 @@ def get_statistics(args, dataset):
         1e-4*np.max(scaler.scale_)
     )
     return scaler.mean_, std
-
 
 def main():
     #torch.backends.cudnn.deterministic = True
@@ -324,6 +325,10 @@ def main():
     parser.add_argument('--no-random-channel',
                         action='store_false',
                         help='Disable random channel selection for each target in the dataset')
+    
+    parser.add_argument('--single-phoneme',
+                        action='store_true',
+                        help='Indicates that the inputed phoneme is given as ONE phoneme per frame, and not 64')
     
     args, _ = parser.parse_known_args()
     
@@ -442,8 +447,8 @@ def main():
         scaler_mean = None
         scaler_std = None
     else:
-        scaler_mean, scaler_std = get_statistics(args, train_dataset)
-        #scaler_mean, scaler_std = None,None
+        #scaler_mean, scaler_std = get_statistics(args, train_dataset)
+        scaler_mean, scaler_std = None,None
         
     if args.modelname == 'open-unmix':
         unmix = open_unmix.OpenUnmix(
@@ -455,7 +460,8 @@ def main():
             n_fft=args.nfft,
             n_hop=args.nhop,
             max_bin=max_bin,
-            sample_rate=train_dataset.sample_rate
+            sample_rate=train_dataset.sample_rate,
+            single_phoneme=args.single_phoneme
         ).to(device)
         
     elif args.modelname == 'deep-u-net':
@@ -483,7 +489,8 @@ def main():
             normalization_style=args.normalization_style,
             sample_rate=train_dataset.sample_rate,
             nb_channels=args.nb_channels,
-            C=C # If jointly, one for the target and one for the rest
+            C=C, # If jointly, one for the target and one for the rest
+            single_phoneme=args.single_phoneme
         ).to(device)
     
     
@@ -570,7 +577,6 @@ def main():
             print(param_group['lr'])
 
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
-        
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
 
         scheduler.step(valid_loss)

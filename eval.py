@@ -34,8 +34,23 @@ def evalTargets(joint,args,device):
         os.makedirs(args.evaldir)
     
     for track in tqdm.tqdm(mus.tracks):
+    #if True:
+        #track = mus.tracks[35]
+        print(track.name)
+        print(track.duration)
+        print("audio shape",track.audio.shape)
+        phoneme = np.load(args.root_phoneme+'/'
+                                +'test'+'_'+track.name+'.npy')
+        phoneme = torch.from_numpy(phoneme)
+        
+        if args.fake:
+            phoneme = torch.zeros(phoneme.shape)
+            phoneme[...,0] = 1
+        
+        
         estimates = test.separate(
             audio=track.audio, # shape [nb_time_points, 2]
+            phoneme=phoneme,
             targets=args.targets,
             model_name=args.model,
             niter=args.niter,
@@ -115,7 +130,6 @@ def evalTargets(joint,args,device):
         with open(args.evaldir+'/'+track.name+'.json', 'w') as outfile:
             json.dump([medians,frame_list], outfile, indent=2)
         
-        print(track.name)
         tracks.append(track.name)
         
         torch.cuda.empty_cache()
@@ -163,6 +177,11 @@ if __name__ == '__main__':
         type=str,
         help='Path to MUSDB18'
     )
+    
+    parser.add_argument('--root-phoneme',
+        type=str,
+        help='root path of .pt phonemes, at acoustic model resolution'
+    )
 
     parser.add_argument(
         '--subset',
@@ -183,6 +202,10 @@ if __name__ == '__main__':
         action='store_true', default=False,
         help='flags wav version of the dataset'
     )
+    
+    parser.add_argument('--fake',
+                        action='store_true',
+                        help='Input fake constant phoneme')
 
     args, _ = parser.parse_known_args()
     args = test.inference_args(parser, args)
