@@ -75,7 +75,8 @@ def load_datasets(parser, args):
             augment_sources=args.no_source_augmentation,
             random_channel=args.no_random_channel,
             nb_channels=args.nb_channels,
-            root_phoneme = args.root_phoneme,
+            root_phoneme=args.root_phoneme,
+            single_phoneme=args.single_phoneme,
             joint=args.joint,
             fake=args.fake,
             **dataset_kwargs
@@ -89,6 +90,7 @@ def load_datasets(parser, args):
             samples_per_track=3-args.nb_channels, seq_duration=None,
             nb_channels=args.nb_channels,
             root_phoneme = args.root_phoneme,
+            single_phoneme=args.single_phoneme,
             joint=args.joint,
             fake=args.fake,
             **dataset_kwargs
@@ -102,6 +104,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         modelname,
         joint,
         root_phoneme=None,
+        single_phoneme=False,
         target='vocals',
         root=None,
         download=False,
@@ -187,6 +190,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         )
         self.root_phoneme = root_phoneme
         self.fake = fake
+        self.single_phoneme = single_phoneme
         
         if len(self.mus.tracks) > 0:
             self.sample_rate = self.mus.tracks[0].rate
@@ -202,11 +206,18 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 track = self.mus.tracks[i]
                 for j in range(self.samples_per_track):
                     chunk_start = math.floor(random.uniform(
-                        0.016, min(track.duration,600) - self.seq_duration)
+                        0, min(track.duration,600) - self.seq_duration - 0.016)
                         / self.phoneme_hop) * self.phoneme_hop
                     
                     self.dataindex[i][j] = chunk_start
-                    
+        
+        self.phonemes_dict = {}
+        
+        for track in self.mus.tracks:
+            phoneme = np.load(self.root_phoneme+'/'
+                            +'train'+'_'+track.name+'.npy')
+            self.phonemes_dict[track.name] = phoneme
+        
     def __getitem__(self, index):
         audio_sources = []
         target_ind = None
@@ -216,7 +227,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         print(random.random())
         print("---")
         """
-
         # select track
         track = self.mus.tracks[index // self.samples_per_track]
 
@@ -238,7 +248,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 # have start time synchronized with phoneme window
                 if self.random_chunk_start:
                     track.chunk_start = math.floor(random.uniform(
-                        0.016, min(track.duration,600) - self.seq_duration - 0.032)
+                        0, min(track.duration,600) - self.seq_duration - 0.016)
                         / self.phoneme_hop) * self.phoneme_hop
                 else:
                     track.chunk_start = self.dataindex[index // self.samples_per_track][index % self.samples_per_track].item()
@@ -246,39 +256,50 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 # load phoneme information over the track if vocals
                 if source == 'vocals':
                     # phoneme shape [phoneme_time_dim,nb_phoneme]
-                    phoneme = np.load(self.root_phoneme+'/'
-                                    +self.split+'_'+track.name+'.npy',
-                                mmap_mode='r+')
-                    
-                    startFrame = math.floor(track.chunk_start/self.phoneme_hop - 1)
-                    nbFrameDuration = math.floor(track.chunk_duration
-                                /self.phoneme_hop) + 2
+                    phoneme = self.phonemes_dict[track.name]
+
+                    startFrame = math.floor(track.chunk_start/self.phoneme_hop)
+                    nbFrameDuration = math.ceil(track.chunk_duration
+                                /self.phoneme_hop)
+
                     phoneme = phoneme[startFrame:startFrame
-                                + nbFrameDuration,:]
+                                + nbFrameDuration]
                     phoneme = torch.from_numpy(phoneme)
+
+                    # At the front, we add one a frame of 0 to mimick the real 
+                    # time evaluation where a frame is missing at the front
+                    # time_transform_posteriograms.timeTransform is built for this behavior
+                    # We add some zeros at the end just in case
+                    if self.single_phoneme:
+                        phoneme = torch.cat((torch.zeros(1),
+                                            phoneme,torch.zeros(5)),dim=0)
+                    else:
+                        phoneme = torch.cat((torch.zeros(1,64),
+                                            phoneme,torch.zeros(5,64)),dim=0)
                     
                     if self.fake:
                         phoneme = torch.zeros(phoneme.shape)
-                        phoneme[...,0] = 1
+                        if not self.single_phoneme:
+                            phoneme[...,0] = 1
                     
-                
+                    
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
                     track.sources[source].audio.T,
                     dtype=self.dtype
                 )
-                
+
                 if self.modelname == 'deep-u-net':
                     audio = audio[...,:98560] # for testing purpose, 128 frames
-                                
+
                 if self.augment_sources:
                     audio = self.source_augmentations(audio)
-                
+
                 if self.nb_channels == 1: # select randomly left or right channel
                     channel_number = 0
                     if self.random_channel: channel_number = random.randint(0, 1) 
                     audio = torch.unsqueeze(audio[channel_number],0)
-                
+
                 audio_sources.append(audio)
                     
             # create stem tensor of shape (nb_sources=4, nb_channels, samples)
@@ -301,8 +322,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
         else:
-            track.chunk_start = 0.016
-            track.chunk_duration = min(track.duration,600) - track.chunk_start - 0.032
+            track.chunk_duration = min(track.duration,600)
             
             # get the non-linear source mix straight from musdb
             x = torch.tensor(
@@ -314,13 +334,24 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 dtype=self.dtype
             )
             
-            phoneme = np.load(self.root_phoneme+'/'
-                                    +'train'+'_'+track.name+'.npy')
+            phoneme = self.phonemes_dict[track.name]
             phoneme = torch.from_numpy(phoneme)
             
+            # At the front, we add one a frame of 0 to mimick the real time evaluation
+            # where a frame is missing at the front
+            # time_transform_posteriograms.timeTransform is built for this behavior
+            # We add some zeros at the end just in case
+            if self.single_phoneme:
+                phoneme = torch.cat((torch.zeros(1),
+                                    phoneme,torch.zeros(5)),dim=0)
+            else:
+                phoneme = torch.cat((torch.zeros(1,64),
+                                    phoneme,torch.zeros(5,64)),dim=0)
+           
             if self.fake:
                 phoneme = torch.zeros(phoneme.shape)
-                phoneme[...,0] = 1
+                if not self.single_phoneme:
+                    phoneme[...,0] = 1
             
             # select left or right depending on index even or not
             if self.nb_channels == 1: 
@@ -334,7 +365,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     y = torch.stack((y,y_accompaniment),dim=0)
                 else:
                     y = torch.unsqueeze(y,0)
-        
         # x shape [nb_channels, nb_time_frames]
         return x, phoneme, y
 

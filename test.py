@@ -54,6 +54,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 max_bin=max_bin
             )
             unmix.stft.center = True
+            unmix.phonemeNetwork.center = True
                     
         if results['args']['modelname'] == 'deep-u-net':
             unmix = deep_u_net.Deep_u_net(
@@ -63,6 +64,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 nb_channels=results['args']['nb_channels']
             )
             unmix.stft.center = True
+            unmix.phonemeNetwork.center = True
         
         if results['args']['modelname'] == 'convtasnet':
             unmix = convtasnet.ConvTasNet(
@@ -93,6 +95,7 @@ def istft(X, rate=44100, n_fft=4096, n_hopsize=1024):
 
 def separate(
     audio,
+    phoneme,
     targets,
     model_name='umxhq',
     niter=1, softmask=False, alpha=1.0,
@@ -145,6 +148,13 @@ def separate(
         mixture = torch.tensor(audio.T[None, ...]).float().to(device)
         # mixture shape [1,2,nb_time_points]
         
+        
+        # At the front, we add one a frame of 0 due to the missing frame at the front
+        # time_transform_posteriograms.timeTransform is built for this behavior
+        # We add some zeros at the end just in case
+        phoneme = torch.cat((torch.zeros(1),phoneme,torch.zeros(5)),dim=0)
+        phoneme = phoneme[None,...].to(device)
+        
         source_names = []
         V = []
         
@@ -162,7 +172,7 @@ def separate(
             if nb_channels_model == 1: 
                 mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
             
-            Vj = unmix_target(mixture).cpu().detach().numpy()
+            Vj = unmix_target(mixture,phoneme).cpu().detach().numpy()
             
             # Revert to channel dimension if mono model
             if nb_channels_model == 1: 
