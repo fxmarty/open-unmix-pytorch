@@ -108,71 +108,6 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
             Y_hat = unmix(x)
             Y = unmix.transform(y)
             
-            """
-            MIX = unmix.transform(x)
-            
-            if epoch_num % 30 == 0 and i <=5 and model_name_general == 'deep-u-net':
-                Y_np = np.array(Y.detach().cpu())
-                Y_hat_np = np.array(Y_hat.detach().cpu())
-                MIX_np = np.array(MIX.detach().cpu())
-                tps = np.linspace(0,x.shape[2]/unmix.sp_rate,Y_np.shape[0])
-                freq = np.linspace(0,unmix.sp_rate//2,Y_np.shape[-1])
-                
-                print("Shape de Y_np:",Y_np.shape)
-                print("Shape du plot:",Y_np[:,0,0,:].T.shape)
-                print("shape du tps:",tps.shape)
-                print("shape du freq:", freq.shape)
-                
-                morceau = Y_np[:,0,0,:]
-                nonzero = np.nonzero(morceau)
-                #print(np.nonzero(morceau))
-                
-                if len(nonzero[0]) > 0:
-                    minval = np.min(morceau[nonzero])
-                    maxval = np.max(morceau[nonzero])
-                else:
-                    minval = 0
-                    maxval = 0
-
-                #if epoch_num == 1:
-                fig, ax = plt.subplots()
-                
-                pcm = ax.pcolormesh(tps, freq, Y_np[:,0,0,:].T,norm=colors.SymLogNorm(vmin=0,vmax=maxval,linthresh=minval),cmap='jet')
-                fig.colorbar(pcm, ax=ax, extend='max')
-
-                #plt.pcolormesh(tps, freq, Y_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
-                plt.title('STFT Magnitude for the target')
-                plt.ylabel('Frequency [Hz]')
-                plt.xlabel('Time [sec]')
-                
-                #plt.savefig('stft_'+str(i)+'_target_'+str(epoch_num)+'.png')
-                plt.savefig('stft_'+str(epoch_num)+'_'+str(i)+'_target'+'.png')
-                
-                #plt.pcolormesh(tps, freq, MIX_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
-                fig, ax = plt.subplots()
-                pcm = ax.pcolormesh(tps, freq, MIX_np[:,0,0,:].T,norm=colors.SymLogNorm(vmin=0,vmax=maxval,linthresh=minval),cmap='jet')
-                fig.colorbar(pcm, ax=ax, extend='max')
-                plt.title('STFT Magnitude for the mixture')
-                plt.ylabel('Frequency [Hz]')
-                plt.xlabel('Time [sec]')
-                
-                #plt.savefig('stft_'+str(i)+'_mixture_'+str(epoch_num)+'.png')
-                plt.savefig('stft_'+str(epoch_num)+'_'+str(i)+'_mixture'+'.png')
-                
-                #plt.pcolormesh(tps, freq, Y_hat_np[:,0,0,:].T, vmin=0, vmax=np.max(Y_np[:,0,0,:])*0.1, shading='gouraud')
-                fig, ax = plt.subplots()
-                pcm = ax.pcolormesh(tps, freq, Y_hat_np[:,0,0,:].T,norm=colors.SymLogNorm(vmin=0,vmax=maxval,linthresh=minval),cmap='jet')
-                fig.colorbar(pcm, ax=ax, extend='max')
-                plt.title('STFT Magnitude for the estimate, epoch' + str(epoch_num))
-                plt.ylabel('Frequency [Hz]')
-                plt.xlabel('Time [sec]')
-                
-                #plt.savefig('stft_'+str(i)+'_estimate_'+str(epoch_num)+'.png')
-                plt.savefig('stft_'+str(epoch_num)+'_'+str(i)+'_estimate'+'.png')
-                
-                plt.close("all")
-                plt.clf()
-            """
             if model_name_general == 'open-unmix':
                 loss = torch.nn.functional.mse_loss(Y_hat, Y)
             
@@ -194,20 +129,6 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         
         i = i + 1
         loss.backward()
-        
-        #plot_grad_flow(unmix.named_parameters(),i)
-        """
-        for name, param in unmix.named_parameters():
-            print(name,param.size(),"---",param.requires_grad)
-            try:
-                print(param.grad.abs().mean())
-                print("Shape gradient:",param.grad.shape)
-            except:
-                print("----------------NONETYPE ERROR")
-            
-            if name == 'repeats.1.7.res_out.bias':
-                print(param.grad)
-        """
         optimizer.step()
         try:
             del y_hat
@@ -220,11 +141,6 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         del x
         del y
         torch.cuda.empty_cache()
-        """
-        if tb is not None:
-            batch_seen = batch_seen + 1 
-            writerTrainLoss.add_scalar('Loss', loss.item(),batch_seen)
-        """
     
     return losses.avg
 
@@ -268,11 +184,7 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
             del x
             del y
             torch.cuda.empty_cache()
-        """
-        if tb is not None:
-            print("Valid:",losses.avg)
-            writerValidationLoss.add_scalar('Loss', losses.avg,batch_seen)
-        """
+
         return losses.avg
 
 # Called only when normalization_style = overall
@@ -471,16 +383,6 @@ def main():
     print("Size train set:",len(train_dataset),"(",len(train_dataset.mus.tracks),
             "*",train_dataset.samples_per_track,", number of tracks * samples per track)")
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
-    print("---")
-    print("len(train_dataset):",len(train_dataset))
-    print("len(train_dataset[0]):",len(train_dataset[0]))
-    print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
-    print("---")
-    """
-    print("len(valid_dataset):",len(valid_dataset))
-    print("len(valid_dataset[0]):",len(valid_dataset[0]))
-    print("valid_dataset[0][0].shape:",valid_dataset[0][0].shape)
-    """
     
     def _init_fn(worker_id):
         torch.manual_seed(args.seed + worker_id) 
@@ -499,24 +401,6 @@ def main():
         worker_init_fn=_init_fn,
         **dataloader_kwargs
     )
-    
-    """
-    examples = enumerate(train_sampler)
-    example = next(examples)
-    batch_idx, (example_data, example_targets) = example
-    print(example_data[5])
-    
-    examples = enumerate(train_sampler)
-    example = next(examples)
-    batch_idx, (example_data, example_targets) = example
-    print(example_data[5])
-    
-    for batch in train_sampler:
-        example_data, example_targets = batch
-        print(example_data.shape)
-        print(example_targets.shape)
-        print("-----")
-    """
     
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth
