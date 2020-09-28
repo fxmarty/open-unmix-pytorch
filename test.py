@@ -51,27 +51,30 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 n_hop=results['args']['nhop'],
                 nb_channels=results['args']['nb_channels'],
                 hidden_size=results['args']['hidden_size'],
-                max_bin=max_bin
+                max_bin=max_bin,
+                single_phoneme=results['args']['single_phoneme']
             )
             unmix.stft.center = True
-            unmix.phonemeNetwork.center = True
+            unmix.phoneme_network.center = True
                     
         if results['args']['modelname'] == 'deep-u-net':
             unmix = deep_u_net.Deep_u_net(
                 normalization_style=results['args']['normalization_style'],
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
-                nb_channels=results['args']['nb_channels']
+                nb_channels=results['args']['nb_channels'],
+                single_phoneme=results['args']['single_phoneme']
             )
             unmix.stft.center = True
-            unmix.phonemeNetwork.center = True
+            unmix.phoneme_network.center = True
         
         if results['args']['modelname'] == 'convtasnet':
             unmix = convtasnet.ConvTasNet(
                 normalization_style=results['args']['normalization_style'],
                 nb_channels=results['args']['nb_channels'],
                 sample_rate=16000,
-                C=2 if results['args']['joint'] else 1
+                C=2 if results['args']['joint'] else 1,
+                single_phoneme=results['args']['single_phoneme']
             )
             
             
@@ -148,11 +151,17 @@ def separate(
         mixture = torch.tensor(audio.T[None, ...]).float().to(device)
         # mixture shape [1,2,nb_time_points]
         
+        single_phoneme = len(phoneme.shape) == 1
         
         # At the front, we add one a frame of 0 due to the missing frame at the front
         # time_transform_posteriograms.timeTransform is built for this behavior
         # We add some zeros at the end just in case
-        phoneme = torch.cat((torch.zeros(1),phoneme,torch.zeros(5)),dim=0)
+        if single_phoneme:
+            phoneme = torch.cat((torch.zeros(1),phoneme,torch.zeros(5)),dim=0)
+        else:
+            phoneme = torch.cat((torch.zeros(1,64),phoneme,torch.zeros(5,64)),dim=0)
+        
+        # add batch dimension
         phoneme = phoneme[None,...].to(device)
         
         source_names = []

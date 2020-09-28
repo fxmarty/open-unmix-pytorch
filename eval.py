@@ -34,18 +34,16 @@ def evalTargets(joint,args,device):
         os.makedirs(args.evaldir)
     
     for track in tqdm.tqdm(mus.tracks):
-    #if True:
-        #track = mus.tracks[35]
         print(track.name)
-        print(track.duration)
-        print("audio shape",track.audio.shape)
+
         phoneme = np.load(args.root_phoneme+'/'
                                 +'test'+'_'+track.name+'.npy')
         phoneme = torch.from_numpy(phoneme)
         
         if args.fake:
             phoneme = torch.zeros(phoneme.shape)
-            phoneme[...,0] = 1
+            if len(phoneme.shape) == 2:
+                phoneme[...,0] = 1
         
         
         estimates = test.separate(
@@ -206,7 +204,7 @@ if __name__ == '__main__':
     parser.add_argument('--fake',
                         action='store_true',
                         help='Input fake constant phoneme')
-
+    
     args, _ = parser.parse_known_args()
     args = test.inference_args(parser, args)
 

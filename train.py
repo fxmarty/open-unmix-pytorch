@@ -392,16 +392,6 @@ def main():
     print("Size train set:",len(train_dataset),"(",len(train_dataset.mus.tracks),
             "*",train_dataset.samples_per_track,", number of tracks * samples per track)")
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
-    print("---")
-    print("len(train_dataset):",len(train_dataset))
-    print("len(train_dataset[0]):",len(train_dataset[0]))
-    print("train_dataset[0][0].shape:",train_dataset[0][0].shape)
-    print("---")
-    """
-    print("len(valid_dataset):",len(valid_dataset))
-    print("len(valid_dataset[0]):",len(valid_dataset[0]))
-    print("valid_dataset[0][0].shape:",valid_dataset[0][0].shape)
-    """
     
     def _init_fn(worker_id):
         torch.manual_seed(args.seed + worker_id) 
@@ -420,24 +410,6 @@ def main():
         worker_init_fn=_init_fn,
         **dataloader_kwargs
     )
-    
-    """
-    examples = enumerate(train_sampler)
-    example = next(examples)
-    batch_idx, (example_data, example_targets) = example
-    print(example_data[5])
-    
-    examples = enumerate(train_sampler)
-    example = next(examples)
-    batch_idx, (example_data, example_targets) = example
-    print(example_data[5])
-    
-    for batch in train_sampler:
-        example_data, example_targets = batch
-        print(example_data.shape)
-        print(example_targets.shape)
-        print("-----")
-    """
     
     max_bin = utils.bandwidth_to_max_bin(
         train_dataset.sample_rate, args.nfft, args.bandwidth

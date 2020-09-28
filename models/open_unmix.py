@@ -21,16 +21,65 @@ class PhonemeNetwork(nn.Module):
         number_of_phonemes,
         fft_window_duration,
         fft_hop_duration,
-        center,
-        single_phoneme,
-        filter_length=5 # has to be odd
+        center
     ):
         super(PhonemeNetwork, self).__init__()
+        
+        self.fc1Phoneme = nn.Sequential(
+                            Linear(number_of_phonemes, phoneme_hidden_size),
+                            nn.ReLU(),
+                            nn.Dropout(p=0.5)
+                            )
+        
+        self.lstmPhoneme = LSTM(
+            input_size=phoneme_hidden_size,
+            hidden_size=phoneme_hidden_size//2,
+            num_layers=2,
+            bidirectional=True,
+            batch_first=True,
+            dropout=0.3
+        )
         
         self.fft_window_duration = fft_window_duration
         self.fft_hop_duration = fft_hop_duration
         self.center = center
-        self.single_phoneme = single_phoneme
+    
+    def forward(self, phoneme,nb_frames):
+        #out [nb_samples, nb_frames, nb_phonemes]
+        phoneme = time_transform_posteriograms.open_unmix(
+                            phoneme,nb_frames,0.016,
+                            self.fft_window_duration,self.fft_hop_duration,
+                            center=self.center)
+
+        nb_samples, nb_frames,nb_phonemes = phoneme.shape
+        
+        # out [nb_samples, nb_frames, phoneme_hidden_size]
+        phoneme = self.fc1Phoneme(phoneme)
+            
+        # out [nb_samples, nb_frames, phoneme_hidden_size]
+        phoneme = self.lstmPhoneme(phoneme)[0]
+        
+        # to adapt to open-unmix, reshape to
+        # [nb_frames,nb_samples,phoneme_hidden_size]
+        phoneme = phoneme.reshape(nb_frames,nb_samples,-1)
+        
+        return phoneme
+
+class PhonemeNetworkSingle(nn.Module):
+    def __init__(
+        self,
+        phoneme_hidden_size,
+        number_of_phonemes,
+        fft_window_duration,
+        fft_hop_duration,
+        center,
+        filter_length=5 # has to be odd
+    ):
+        super(PhonemeNetworkSingle, self).__init__()
+        
+        self.fft_window_duration = fft_window_duration
+        self.fft_hop_duration = fft_hop_duration
+        self.center = center
         
         self.embedding = nn.Sequential(
                             nn.Embedding(number_of_phonemes+1,
@@ -54,17 +103,10 @@ class PhonemeNetwork(nn.Module):
     def forward(self, phoneme,nb_frames):
         
         #out [nb_samples, nb_frames]
-        if self.single_phoneme:
-            phoneme = time_transform_posteriograms.open_unmix_single(
-                                phoneme,nb_frames,0.016,
-                                self.fft_window_duration,self.fft_hop_duration,
-                                center=self.center)
-        else:
-            raise ValueError("Several phonemes not yet supported for UMX")
-            phoneme = time_transform_posteriograms.open_unmix(
-                                phoneme,nb_frames,0.016,
-                                self.fft_window_duration,self.fft_hop_duration,
-                                center=self.center)
+        phoneme = time_transform_posteriograms.open_unmix_single(
+                            phoneme,nb_frames,0.016,
+                            self.fft_window_duration,self.fft_hop_duration,
+                            center=self.center)
         
         nb_samples, nb_frames = phoneme.shape
         
@@ -186,14 +228,22 @@ class OpenUnmix(nn.Module):
             torch.ones(self.nb_output_bins).float()
         )
         
-        self.phoneme_network = PhonemeNetwork(
-                                    phoneme_hidden_size=phoneme_hidden_size,
-                                    number_of_phonemes=number_of_phonemes,
-                                    fft_window_duration=n_fft/self.sp_rate,
-                                    fft_hop_duration=n_hop/self.sp_rate,
-                                    center=False,
-                                    single_phoneme=single_phoneme
-                                )
+        if single_phoneme:
+            self.phoneme_network = PhonemeNetworkSingle(
+                                        phoneme_hidden_size=phoneme_hidden_size,
+                                        number_of_phonemes=number_of_phonemes,
+                                        fft_window_duration=n_fft/self.sp_rate,
+                                        fft_hop_duration=n_hop/self.sp_rate,
+                                        center=False
+                                    )
+        else:
+            self.phoneme_network = PhonemeNetwork(
+                                        phoneme_hidden_size=phoneme_hidden_size,
+                                        number_of_phonemes=number_of_phonemes,
+                                        fft_window_duration=n_fft/self.sp_rate,
+                                        fft_hop_duration=n_hop/self.sp_rate,
+                                        center=False
+                                    )
     
     def forward(self, x, phoneme):
         # check for waveform or spectrogram

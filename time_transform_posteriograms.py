@@ -119,7 +119,6 @@ def open_unmix_single(phoneme,nb_fft_frames,phoneme_hop,fft_window,
     #output shape [batch_size, nb_fft_frames]
     return output
 
-
 # The phoneme window is assumed to be much larger than the encoder window in Conv-TasNet
 def conv_tasnet_single(phoneme,nb_frames,padding_size,
                 phoneme_hop,encoder_kernel,encoder_stride,sp_rate):
@@ -150,14 +149,39 @@ def conv_tasnet_single(phoneme,nb_frames,padding_size,
             phonemeCorrespondingFrame = 1
         
         frame_list.append(phonemeCorrespondingFrame)
-        
-        """debugging
-        if i < 80:
-            print(correspondingTime,"---",i,"---",phonemeCorrespondingFrame)
-        """
+    
     output[:,pad_left:nb_frames - pad_right + 1] = phoneme[:,frame_list]
     
     # out [batch_size, nb_frames]
+    return output
+
+# stride and hop are in seconds
+# Assumption : phoneme window = 2 * phoneme hop
+def conv_tasnet(phoneme,nb_frames,padding_size,
+                phoneme_hop,encoder_kernel,encoder_stride,sp_rate):
+    nb_samples, nb_phoneme_frames, nb_phonemes = phoneme.size()
+    
+    pad_left = padding_size//2
+    pad_right = padding_size - pad_left
+
+    output = torch.zeros(nb_samples,nb_frames,nb_phonemes).to(phoneme.device)
+    
+    frame_list = []
+
+    # we leave zeros in the padding regions
+    for i in range(pad_left,nb_frames - pad_right + 1):
+        correspondingTime = encoder_kernel/2 + i * encoder_stride - pad_left/sp_rate
+        
+        # Beware that the 'phoneme' also inputs the preceding frame as only zeros,
+        # corresponding to indice -1 normally (but here 0).
+        # - 0.5 to take the closest phoneme window in its middle
+        phonemeCorrespondingFrame = math.ceil(correspondingTime/phoneme_hop - 0.5)
+        
+        frame_list.append(phonemeCorrespondingFrame)
+        
+    output[:,pad_left:nb_frames - pad_right + 1,:] = phoneme[:,frame_list,:]
+    
+    # out [batch_size, nb_frames, nb_phonemes]
     return output
 
 if __name__ == '__main__':

@@ -16,6 +16,7 @@ from utils import checkValidConvolution, valid_length, memory_check
 import time_transform_posteriograms
 import normalization
 
+
 class PhonemeNetwork(nn.Module):
     def __init__(self,
                 L,
@@ -23,8 +24,7 @@ class PhonemeNetwork(nn.Module):
                 phoneme_hidden_size,
                 N,
                 sp_rate,
-                single_phoneme, # indicates of the phoneme map is of 64 or 1
-                filter_length=5 # has to be odd
+                filter_length=63 # has to be odd
                 ):
         
         super(PhonemeNetwork, self).__init__()
@@ -32,7 +32,87 @@ class PhonemeNetwork(nn.Module):
         self.sp_rate = sp_rate
         self.encoder_kernel = L/sp_rate
         self.encoder_stride = self.encoder_kernel/2
-        self.single_phoneme = single_phoneme
+        
+        self.fc1Phoneme = nn.Sequential(
+                            nn.Linear(number_of_phonemes, phoneme_hidden_size),
+                            nn.ReLU(),
+                            nn.Dropout(p=0.5)
+                          )
+        
+        self.convol = nn.Sequential(
+                        nn.Conv1d(in_channels=phoneme_hidden_size,
+                              out_channels=phoneme_hidden_size,
+                              kernel_size=filter_length,
+                              stride=1,
+                              padding=filter_length//2
+                                ),
+                        nn.ReLU()
+                        )
+        
+        self.fc_weights = nn.Sequential(
+                            nn.Linear(phoneme_hidden_size, N),
+                            nn.ReLU()
+                          )
+                          
+        self.fc_bias = nn.Sequential(
+                            nn.Linear(phoneme_hidden_size, N),
+                            nn.ReLU()
+                       )
+                
+        """
+        Input: phoneme posteriogram (nb_samples,nb_time_frames_phoneme, nb_phonemes)
+
+        """
+    def forward(self, phoneme,nb_frames,padding_size):
+        
+        nb_samples, nb_old_frames, nb_phonemes = phoneme.size()
+        
+        # out [nb_samples, nb_frames, nb_phonemes]
+        phoneme = time_transform_posteriograms.conv_tasnet(
+                                    phoneme,nb_frames,
+                                    padding_size,0.016,self.encoder_kernel,
+                                    self.encoder_stride,sp_rate=self.sp_rate)
+        
+        # out [nb_samples, nb_frames, phoneme_hidden_size]
+        phoneme = self.fc1Phoneme(phoneme)
+        
+        # to adapt to convolution need, reshape to
+        # [nb_samples, phoneme_hidden_size, nb_frames]
+        phoneme = torch.transpose(phoneme,1,2)
+
+        # out [nb_samples, phoneme_hidden_size, nb_frames]
+        phoneme = self.convol(phoneme)
+
+        # out [nb_samples, nb_frames, phoneme_hidden_size]
+        phoneme = torch.transpose(phoneme,1,2)
+
+        # out 2 * [nb_samples, nb_frames, N]
+        weights = self.fc_weights(phoneme)
+        bias = self.fc_weights(phoneme)
+
+        # transpose for consistency with the main separation model
+        weights = torch.transpose(weights,-1,-2)
+        bias = torch.transpose(bias,-1,-2)
+        
+        # out 2 * [nb_samples, N, nb_frames]
+        return weights,bias
+
+
+class PhonemeNetworkSingle(nn.Module):
+    def __init__(self,
+                L,
+                number_of_phonemes,
+                phoneme_hidden_size,
+                N,
+                sp_rate,
+                filter_length=63 # has to be odd
+                ):
+        
+        super(PhonemeNetworkSingle, self).__init__()
+        
+        self.sp_rate = sp_rate
+        self.encoder_kernel = L/sp_rate
+        self.encoder_stride = self.encoder_kernel/2
         
         self.embedding = nn.Sequential(
                             nn.Embedding(number_of_phonemes+1,
@@ -63,20 +143,16 @@ class PhonemeNetwork(nn.Module):
                        )
                 
         """
-        Input: phoneme posteriogram (nb_time_frames_phoneme, nb_phonemes)
+        Input: phoneme posteriogram (nb_samples,nb_time_frames_phoneme)
 
         """
     def forward(self, phoneme,nb_frames,padding_size):
         
         # out [nb_samples, nb_frames]
-        if self.single_phoneme:
-            phoneme = time_transform_posteriograms.conv_tasnet_single(
-                                        phoneme,nb_frames,
-                                        padding_size,0.016,self.encoder_kernel,
-                                        self.encoder_stride,sp_rate=self.sp_rate)
-        
-        else:
-            raise ValueError("Multiple phoneme version has to be implemented for CTN")
+        phoneme = time_transform_posteriograms.conv_tasnet_single(
+                                    phoneme,nb_frames,
+                                    padding_size,0.016,self.encoder_kernel,
+                                    self.encoder_stride,sp_rate=self.sp_rate)
         
         # out [nb_samples, nb_frames, phoneme_hidden_size]
         phoneme = self.embedding(phoneme)
@@ -229,12 +305,18 @@ class ConvTasNet(nn.Module):
         self.layerNorm = nn.GroupNorm(1, N, eps=1e-8)
         self.bottleneck_conv1x1 = nn.Conv1d(N, B, 1)
         
-        self.phoneme_network = PhonemeNetwork(L=L,
-                                              number_of_phonemes=number_of_phonemes,
-                                              phoneme_hidden_size=phoneme_hidden_size,
-                                              N=N,
-                                              sp_rate=self.sp_rate,
-                                              single_phoneme=single_phoneme)
+        if single_phoneme:
+            self.phoneme_network = PhonemeNetworkSingle(L=L,
+                                                number_of_phonemes=number_of_phonemes,
+                                                phoneme_hidden_size=phoneme_hidden_size,
+                                                N=N,
+                                                sp_rate=self.sp_rate)
+        else:
+            self.phoneme_network = PhonemeNetwork(L=L,
+                                                number_of_phonemes=number_of_phonemes,
+                                                phoneme_hidden_size=phoneme_hidden_size,
+                                                N=N,
+                                                sp_rate=self.sp_rate)
         
         self.repeats = nn.ModuleList()
         
