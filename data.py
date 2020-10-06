@@ -150,8 +150,8 @@ class MUSDBDataset(torch.utils.data.Dataset):
             used to add further control for the musdb dataset
             initialization function.
 
-        """
-        self.phoneme_hop = 0.016 # in seconds, to compare with the informed version
+        """       
+        self.phoneme_hop = 0.016
         
         self.modelname = modelname
         self.joint = joint
@@ -280,7 +280,9 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 track.targets[self.target].audio.T,
                 dtype=self.dtype
             )
-            if self.nb_channels == 1: # select left or right depending on index even or not
+            
+            # select left or right depending on index even or not
+            if self.nb_channels == 1: 
                 x = torch.unsqueeze(x[index%2],0)
                 y = torch.unsqueeze(y[index%2],0)
             # if nb_channels = 2, use both channels

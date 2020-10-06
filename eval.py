@@ -34,6 +34,7 @@ def evalTargets(joint,args,device):
         os.makedirs(args.evaldir)
     
     for track in tqdm.tqdm(mus.tracks):
+        print(track.name)
         estimates = test.separate(
             audio=track.audio, # shape [nb_time_points, 2]
             targets=args.targets,
@@ -115,7 +116,6 @@ def evalTargets(joint,args,device):
         with open(args.evaldir+'/'+track.name+'.json', 'w') as outfile:
             json.dump([medians,frame_list], outfile, indent=2)
         
-        print(track.name)
         tracks.append(track.name)
         
         torch.cuda.empty_cache()

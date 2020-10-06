@@ -4,6 +4,22 @@ import os
 import numpy as np
 import math
 
+def pad_for_stft(signal, hop_length):
+    """
+    this function pads the given signal so that all samples are taken into account by the stft
+    input and output signal have shape (batch_size, nb_channels, nb_timesteps)
+    """
+    signal_len = signal.shape[-1]
+    
+    incomplete_frame_len = signal_len % hop_length
+    
+    if incomplete_frame_len == 0: # no padding needed
+        return signal, 0
+    else:
+        pad_length = hop_length - incomplete_frame_len
+        signal = torch.nn.functional.pad(signal, pad=(0, pad_length))
+        return signal,pad_length
+
 def memory_check(comment):
     print(comment,torch.cuda.memory_reserved(0)*1e-9, "GB out of",torch.cuda.get_device_properties(0).total_memory*1e-9, "GB used.")
 

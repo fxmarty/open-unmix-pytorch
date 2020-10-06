@@ -82,24 +82,51 @@ class Spectrogram(nn.Module):
 
 if __name__ == '__main__':
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    data = torch.zeros((8,2,1024*60+1023)).to(device)
+    import utils
+    import test
     
-    stftNoCenter = STFT(center=False).to(device)
-    stftWithCenter = STFT(center=True).to(device)
+    data = torch.zeros((1,2,220500))
+    print(data.shape)
     
-    res_noCenter = stftNoCenter(data)
-    res_withCenter = stftWithCenter(data)
+    pad_length = 0
+    data,pad_length = utils.pad_for_stft(data, 1024)
+    print(data.shape)
+    
+    stftNoCenter = STFT(center=False)
+    stftWithCenter = STFT(center=True)
+        
+    res_noCenter = stftNoCenter(data).cpu().numpy()
+    res_withCenter = stftWithCenter(data).cpu().numpy()
+    
+    res_noCenter = res_noCenter[..., 0] + res_noCenter[..., 1]*1j
+    res_noCenter = res_noCenter[0].transpose(2, 1, 0)
+    
+    res_withCenter = res_withCenter[..., 0] + res_withCenter[..., 1]*1j
+    res_withCenter = res_withCenter[0].transpose(2, 1, 0)
     
     padding = int(4096//2)
-    
     
     th_nopad = (data.shape[-1] - (4096 - 1) - 1)/1024 + 1
     
     th_pad = (data.shape[-1] + 2*padding - (4096 - 1) - 1)/1024 + 1
-    print("Theorical output without padding:",th_nopad)
-    print("Theorical output shape with padding:",th_pad)
+    print("Theorical output without Center:",th_nopad)
+    print("Theorical output shape with Center:",th_pad)
     
-    print(res_noCenter.shape)
-    print(res_withCenter.shape)
+    
+    print("No center",res_noCenter.shape)
+    print("With center",res_withCenter.shape)
+    
+    print("-- istft --")
+    istft_noCenter = test.istft(res_noCenter.T)
+    istft_withCenter = test.istft(res_withCenter.T)
+    
+    print("No center",istft_noCenter.shape)
+    print("With center",istft_withCenter.shape)
+    
+    if pad_length > 0:
+        print("-- istft unpadded --")
+        print("No center",istft_noCenter[...,:-pad_length].shape)
+        print("With center",istft_withCenter[...,:-pad_length].shape)
+    
+    
     
