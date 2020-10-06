@@ -208,7 +208,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     chunk_start = math.floor(random.uniform(
                         0, min(track.duration,600) - self.seq_duration - 0.016)
                         / self.phoneme_hop) * self.phoneme_hop
-                    
                     self.dataindex[i][j] = chunk_start
         
         self.phonemes_dict = {}
@@ -255,20 +254,22 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 
                 # load phoneme information over the track if vocals
                 if source == 'vocals':
-                    # phoneme shape [phoneme_time_dim,nb_phoneme]
-                    phoneme = self.phonemes_dict[track.name]
+                    
 
+                    # we DO NOT give the first overlapping phoneme window as an 
+                    #input, as at inference time, we start from the beginning of 
+                    # songs that do not have this information
                     startFrame = math.floor(track.chunk_start/self.phoneme_hop)
-                    nbFrameDuration = math.ceil(track.chunk_duration
-                                /self.phoneme_hop)
-
-                    phoneme = phoneme[startFrame:startFrame
-                                + nbFrameDuration]
+                    nbFrames = math.ceil((track.chunk_duration - 0.032)/0.016 + 1) + 1
+                    
+                    # phoneme shape before slice [phoneme_time_dim,nb_phoneme]
+                    phoneme = self.phonemes_dict[track.name][startFrame:startFrame+nbFrames]
                     phoneme = torch.from_numpy(phoneme)
-
+                    
                     # At the front, we add one a frame of 0 to mimick the real 
                     # time evaluation where a frame is missing at the front
-                    # time_transform_posteriograms.timeTransform is built for this behavior
+                    # time_transform_posteriograms.timeTransform 
+                    # is built for this behavior
                     # We add some zeros at the end just in case
                     if self.single_phoneme:
                         phoneme = torch.cat((torch.zeros(1),

@@ -102,7 +102,8 @@ def separate(
     targets,
     model_name='umxhq',
     niter=1, softmask=False, alpha=1.0,
-    residual_model=False, device='cpu'
+    residual_model=False, device='cpu',
+    offset=0
 ):
     """
     Performing the separation on audio input
@@ -167,7 +168,7 @@ def separate(
         source_names = []
         V = []
         
-        for j, target in enumerate(tqdm.tqdm(targets)): # tqdm for progress bar
+        for j, target in enumerate(targets):
             unmix_target,args = load_model(
                 target=target,
                 model_name=model_name,
@@ -177,11 +178,16 @@ def separate(
             modelname = args['args']['modelname']
             nb_channels_model = args['args']['nb_channels']
             
-            # If the model takes mono as input, put the channels in the number of samples dim
+            # If the model takes mono as input,
+            # put the channels in the number of samples dim
             if nb_channels_model == 1: 
                 mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
             
-            Vj = unmix_target(mixture,phoneme).cpu().detach().numpy()
+            # add padding to the mixture to have a complete window for the last frame
+            if modelname in ('open-unmix', 'deep-u-net'):
+                mixture, padding = utils.pad_for_stft(mixture,args['args']['nhop'])
+            
+            Vj = unmix_target(mixture,phoneme,offset).cpu().detach().numpy()
             
             # Revert to channel dimension if mono model
             if nb_channels_model == 1: 
@@ -236,7 +242,11 @@ def separate(
                     Y[..., j].T,
                     n_fft=unmix_target.stft.n_fft,
                     n_hopsize=unmix_target.stft.n_hop
-                )
+                ) # shape [nb_channels, nb_time_frames]
+                
+                if padding > 0: # remove padding added for complete stft
+                    audio_hat = audio_hat[...,:-padding] 
+                
                 estimates[name] = audio_hat.T
         
         if modelname == 'deep-u-net': # without wiener filtering

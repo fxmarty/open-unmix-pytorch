@@ -42,7 +42,7 @@ def evalTargets(joint,args,device):
         
         if args.fake:
             phoneme = torch.zeros(phoneme.shape)
-            if len(phoneme.shape) == 2:
+            if len(phoneme.shape) == 2: # if 64 phonemes
                 phoneme[...,0] = 1
         
         
@@ -54,7 +54,8 @@ def evalTargets(joint,args,device):
             niter=args.niter,
             alpha=args.alpha,
             softmask=args.softmask,
-            device=device
+            device=device,
+            offset=0
         )
         
         if args.outdir:

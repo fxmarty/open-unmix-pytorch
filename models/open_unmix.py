@@ -44,12 +44,12 @@ class PhonemeNetwork(nn.Module):
         self.fft_hop_duration = fft_hop_duration
         self.center = center
     
-    def forward(self, phoneme,nb_frames):
+    def forward(self, phoneme,nb_frames,offset):
         #out [nb_samples, nb_frames, nb_phonemes]
         phoneme = time_transform_posteriograms.open_unmix(
                             phoneme,nb_frames,0.016,
                             self.fft_window_duration,self.fft_hop_duration,
-                            center=self.center)
+                            center=self.center,offset=offset)
 
         nb_samples, nb_frames,nb_phonemes = phoneme.shape
         
@@ -100,13 +100,13 @@ class PhonemeNetworkSingle(nn.Module):
                         )
     
     
-    def forward(self, phoneme,nb_frames):
+    def forward(self, phoneme,nb_frames,offset):
         
         #out [nb_samples, nb_frames]
         phoneme = time_transform_posteriograms.open_unmix_single(
                             phoneme,nb_frames,0.016,
                             self.fft_window_duration,self.fft_hop_duration,
-                            center=self.center)
+                            center=self.center,offset=offset)
         
         nb_samples, nb_frames = phoneme.shape
         
@@ -245,7 +245,7 @@ class OpenUnmix(nn.Module):
                                         center=False
                                     )
     
-    def forward(self, x, phoneme):
+    def forward(self, x, phoneme,offset=0):
         # check for waveform or spectrogram
         # transform to spectrogram if (nb_samples, nb_channels, nb_timesteps)
         # and reduce feature dimensions, therefore we reshape
@@ -271,7 +271,7 @@ class OpenUnmix(nn.Module):
         x = torch.tanh(x)
 
         # out [nb_frames,nb_samples,phoneme_hidden_size]
-        phoneme = self.phoneme_network(phoneme,nb_frames)
+        phoneme = self.phoneme_network(phoneme,nb_frames,offset=offset)
         
         # out [nb_frames, nb_samples,hidden_size+phoneme_hidden_size]
         x = torch.cat([x,phoneme],dim=-1)

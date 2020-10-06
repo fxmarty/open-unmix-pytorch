@@ -3,9 +3,35 @@ import tf_transforms
 import musdb
 import math
 
-# stride and hop are in seconds
-# Assumption : phoneme window = 2 * phoneme hop
-def open_unmix(phoneme,nb_fft_frames,phoneme_hop,fft_window,fft_hop,center=False):
+def open_unmix(phoneme,nb_fft_frames,phoneme_hop,fft_window,
+                fft_hop,offset,center=False):
+    """
+    Parameters
+    -------
+    phoneme: tensor of shape [nb_samples, nb_phoneme_frames, nb_phonemes=64]
+    
+    nb_fft_frames: number of STFT frames in the current sample being processed by
+        the model
+    
+    phoneme_hop: hop length in seconds for the phoneme tensor. The phoneme window
+        is assumed to be 2 * phoneme_hop.
+    
+    fft_window: window length of the FFT in the model in seconds
+    
+    fft_hop: hop length of the FFT in the model in seconds
+    
+    center: 'False' if the STFT was computed with 'center=False' parameter.
+        'True' means the signal has been paded with int(nfft/2) before going into
+        the STFT
+    
+    offset: the time difference between the start of the preceding phoneme frame
+        and the start of the signal. This may be non zero only at test time
+    
+    Returns
+    -------
+    A reshaped phoneme tensor of shape [batch_size, nb_fft_frames, nb_phonemes]
+    """
+    
     nb_samples, nb_phoneme_frames, nb_phonemes = phoneme.size()
     
     weight_matrix = torch.zeros(nb_fft_frames,nb_phoneme_frames).to(phoneme.device)
@@ -13,18 +39,17 @@ def open_unmix(phoneme,nb_fft_frames,phoneme_hop,fft_window,fft_hop,center=False
     for i in range(nb_fft_frames):
         alpha = phoneme_hop/fft_window
         
-        # center is an argument of torch.stft that pad the input signal if center=True
         if center == False: # at training time
-            start_time = i * fft_hop
+            start_time = i * fft_hop + offset
             end_time = start_time + fft_window
         
         elif center == True: # at test time
-            start_time = i * fft_hop - fft_window/2
+            start_time = i * fft_hop - fft_window/2 + offset
             end_time = start_time + fft_window
             
             # case where the start point of the window is in the padding (at begin)
             if start_time < 0:
-                start_time = 0
+                start_time = 0 + offset
             
             # case where the end point of the window is in the padding (at end)
             if end_time > ((nb_fft_frames - math.ceil(fft_window/fft_hop) - 1) 
@@ -34,6 +59,8 @@ def open_unmix(phoneme,nb_fft_frames,phoneme_hop,fft_window,fft_hop,center=False
         
         # variables defined as the limit numbers of the phoneme frames that overlap 
         # with the current fft window
+        # be aware that the phoneme has been padded with 1 frame
+        # of 0 at the beginning
         phonemeStartFrame = math.floor(start_time/phoneme_hop)
         phonemeEndFrame = math.ceil(end_time/phoneme_hop)
         
@@ -72,7 +99,7 @@ def open_unmix(phoneme,nb_fft_frames,phoneme_hop,fft_window,fft_hop,center=False
 # stride and hop are in seconds
 # Assumption : phoneme window = 2 * phoneme hop
 def open_unmix_single(phoneme,nb_fft_frames,phoneme_hop,fft_window,
-                    fft_hop,center=False):
+                    fft_hop,offset,center=False):
     nb_samples, nb_phoneme_frames = phoneme.size()
     
     output = torch.zeros(nb_samples,nb_fft_frames,dtype=torch.long).to(phoneme.device)
@@ -87,16 +114,16 @@ def open_unmix_single(phoneme,nb_fft_frames,phoneme_hop,fft_window,
         
         # center is an argument of torch.stft that pad the input signal if center=True
         if center == False: # at training time
-            start_time = i * fft_hop
+            start_time = i * fft_hop + offset
             end_time = start_time + fft_window
         
         elif center == True: # at test time
-            start_time = i * fft_hop - fft_window/2
+            start_time = i * fft_hop - fft_window/2 + offset
             end_time = start_time + fft_window
             
             # case where the start point of the window is in the padding (at begin)
             if start_time < 0:
-                start_time = 0
+                start_time = 0 + offset
             
             # case where the end point of the window is in the padding (at end)
             if end_time > ((nb_fft_frames - math.ceil(fft_window/fft_hop) - 1) 
