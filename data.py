@@ -8,7 +8,6 @@ import torch
 import tqdm
 import librosa
 import math
-import numpy as np
 
 import random
 
@@ -42,59 +41,54 @@ def load_datasets(parser, args):
     Returns:
         train_dataset, validation_dataset
     """
-    if args.dataset == 'musdb': # Default case
-        parser.add_argument('--is-wav','--is_wav',
-                            action='store_true', default=False,
-                            help='loads wav instead of STEMS')
-        parser.add_argument('--samples-per-track','--samples_per_track',
-                            type=int, default=64)
-        parser.add_argument('--source-augmentations','--source_augmentations',
-                            type=str, nargs='+', default=['gain', 'channelswap'])
+    parser.add_argument('--is-wav','--is_wav',
+                        action='store_true', default=False,
+                        help='loads wav instead of STEMS')
+    parser.add_argument('--samples-per-track','--samples_per_track',
+                        type=int, default=64)
+    parser.add_argument('--source-augmentations','--source_augmentations',
+                        type=str, nargs='+', default=['gain', 'channelswap'])
 
-        args = parser.parse_args()
-        dataset_kwargs = {
-            'root': args.root,
-            'is_wav': args.is_wav,
-            'subsets': 'train',
-            'target': args.target,
-            'download': args.root is None
-        }
+    args = parser.parse_args()
+    dataset_kwargs = {
+        'root': args.root,
+        'is_wav': args.is_wav,
+        'subsets': 'train',
+        'target': args.target,
+        'download': args.root is None
+    }
 
-        source_augmentations = Compose(
-            [globals()['_augment_' + aug] for aug in args.source_augmentations]
-        )
-        
-        train_dataset = MUSDBDatasetInformed(
-            modelname = args.modelname,
-            split='train',
-            samples_per_track=args.samples_per_track,
-            seq_duration=args.seq_dur,
-            source_augmentations=source_augmentations,
-            random_track_mix=args.no_random_track_mix,
-            random_chunk_start=args.no_random_chunk_start,
-            augment_sources=args.no_source_augmentation,
-            random_channel=args.no_random_channel,
-            nb_channels=args.nb_channels,
-            root_phoneme=args.root_phoneme,
-            single_phoneme=args.single_phoneme,
-            joint=args.joint,
-            fake=args.fake,
-            **dataset_kwargs
-        )
+    source_augmentations = Compose(
+        [globals()['_augment_' + aug] for aug in args.source_augmentations]
+    )
+    
+    train_dataset = MUSDBDatasetInformed(
+        modelname = args.modelname,
+        split='train',
+        samples_per_track=args.samples_per_track,
+        seq_duration=args.seq_dur,
+        source_augmentations=source_augmentations,
+        random_track_mix=args.no_random_track_mix,
+        random_chunk_start=args.no_random_chunk_start,
+        augment_sources=args.no_source_augmentation,
+        random_channel=args.no_random_channel,
+        nb_channels=args.nb_channels,
+        root_phoneme=args.root_phoneme,
+        fake=args.fake,
+        **dataset_kwargs
+    )
 
-        # samples_per_track is 1 for stereo case, 2 for mono case, and that is
-        # because MUSDB is a stereo dataset. If we train for the mono case,
-        # both left and right tracks will be used for validation.
-        valid_dataset = MUSDBDatasetInformed(
-            modelname = args.modelname, split='valid',
-            samples_per_track=3-args.nb_channels, seq_duration=None,
-            nb_channels=args.nb_channels,
-            root_phoneme = args.root_phoneme,
-            single_phoneme=args.single_phoneme,
-            joint=args.joint,
-            fake=args.fake,
-            **dataset_kwargs
-        )
+    # samples_per_track is 1 for stereo case, 2 for mono case, and that is
+    # because MUSDB is a stereo dataset. If we train for the mono case,
+    # both left and right tracks will be used for validation.
+    valid_dataset = MUSDBDatasetInformed(
+        modelname = args.modelname, split='valid',
+        samples_per_track=3-args.nb_channels, seq_duration=None,
+        nb_channels=args.nb_channels,
+        root_phoneme = args.root_phoneme,
+        fake=args.fake,
+        **dataset_kwargs
+    )
 
     return train_dataset, valid_dataset, args
 
@@ -102,9 +96,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
     def __init__(
         self,
         modelname,
-        joint,
         root_phoneme=None,
-        single_phoneme=False,
         target='vocals',
         root=None,
         download=False,
@@ -165,7 +157,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         self.phoneme_hop = 0.016 # in seconds
         
         self.modelname = modelname
-        self.joint = joint
         self.is_wav = is_wav
         self.seq_duration = seq_duration
         self.target = target
@@ -190,13 +181,12 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         )
         self.root_phoneme = root_phoneme
         self.fake = fake
-        self.single_phoneme = single_phoneme
         
         if len(self.mus.tracks) > 0:
             self.sample_rate = self.mus.tracks[0].rate
         
         else:
-            self.sample_rate = 44100 # to modify manually for minimal tests
+            self.sample_rate = 16000 # to modify manually for minimal tests
         
         self.dtype = dtype
         
@@ -213,8 +203,8 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         self.phonemes_dict = {}
         
         for track in self.mus.tracks:
-            phoneme = np.load(self.root_phoneme+'/'
-                            +'train'+'_'+track.name+'.npy')
+            phoneme = torch.load(self.root_phoneme+'/'
+                            +'train'+'_'+track.name+'.pt')
             self.phonemes_dict[track.name] = phoneme
         
     def __getitem__(self, index):
@@ -260,38 +250,21 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     #input, as at inference time, we start from the beginning of 
                     # songs that do not have this information
                     startFrame = math.floor(track.chunk_start/self.phoneme_hop)
-                    nbFrames = math.ceil((track.chunk_duration - 0.032)/0.016 + 1) + 1
+                    nbFrames = math.floor((track.chunk_duration - 0.032)/0.016 + 1)
                     
                     # phoneme shape before slice [phoneme_time_dim,nb_phoneme]
                     phoneme = self.phonemes_dict[track.name][startFrame:startFrame+nbFrames]
-                    phoneme = torch.from_numpy(phoneme)
-                    
-                    # At the front, we add one a frame of 0 to mimick the real 
-                    # time evaluation where a frame is missing at the front
-                    # time_transform_posteriograms.timeTransform 
-                    # is built for this behavior
-                    # We add some zeros at the end just in case
-                    if self.single_phoneme:
-                        phoneme = torch.cat((torch.zeros(1),
-                                            phoneme,torch.zeros(5)),dim=0)
-                    else:
-                        phoneme = torch.cat((torch.zeros(1,64),
-                                            phoneme,torch.zeros(5,64)),dim=0)
                     
                     if self.fake:
                         phoneme = torch.zeros(phoneme.shape)
-                        if not self.single_phoneme:
-                            phoneme[...,0] = 1
-                    
+                        indice = random.randint(0,64)
+                        phoneme[...,indice] = 1
                     
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
                     track.sources[source].audio.T,
                     dtype=self.dtype
                 )
-
-                if self.modelname == 'deep-u-net':
-                    audio = audio[...,:98560] # for testing purpose, 128 frames
 
                 if self.augment_sources:
                     audio = self.source_augmentations(audio)
@@ -312,18 +285,17 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 y = stems[target_ind]
             else:
                 raise ValueError("Target has not been given.")
-            
-            if self.modelname == 'convtasnet':
-                if self.joint == True:
-                    y_accompaniment = x - y
-                    y = torch.stack((y,y_accompaniment),dim=0)
-                else:
-                    y = torch.unsqueeze(y,0)
 
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
         else:
-            track.chunk_duration = min(track.duration,600)
+            #print("---")
+            #print(track.name)
+            #print(track.duration)
+            track.chunk_duration = min(track.duration - 0.016,600)
+            
+            nbFrames = math.floor((track.chunk_duration - 0.032)/0.016 + 1)
+            
             
             # get the non-linear source mix straight from musdb
             x = torch.tensor(
@@ -335,37 +307,23 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 dtype=self.dtype
             )
             
-            phoneme = self.phonemes_dict[track.name]
-            phoneme = torch.from_numpy(phoneme)
-            
-            # At the front, we add one a frame of 0 to mimick the real time evaluation
-            # where a frame is missing at the front
-            # time_transform_posteriograms.timeTransform is built for this behavior
-            # We add some zeros at the end just in case
-            if self.single_phoneme:
-                phoneme = torch.cat((torch.zeros(1),
-                                    phoneme,torch.zeros(5)),dim=0)
-            else:
-                phoneme = torch.cat((torch.zeros(1,64),
-                                    phoneme,torch.zeros(5,64)),dim=0)
+            phoneme = self.phonemes_dict[track.name][:nbFrames]
            
+            #print("phoneme total",self.phonemes_dict[track.name].shape)
+            #print("phoneme", phoneme.shape)
+            #print("audio",x.shape)
+            
             if self.fake:
                 phoneme = torch.zeros(phoneme.shape)
-                if not self.single_phoneme:
-                    phoneme[...,0] = 1
+                indice = random.randint(0,64)
+                phoneme[...,indice] = 1
             
             # select left or right depending on index even or not
             if self.nb_channels == 1: 
                 x = torch.unsqueeze(x[index%2],0)
                 y = torch.unsqueeze(y[index%2],0)
             # if nb_channels = 2, use both channels
-            
-            if self.modelname == 'convtasnet':
-                if self.joint == True:
-                    y_accompaniment = x - y
-                    y = torch.stack((y,y_accompaniment),dim=0)
-                else:
-                    y = torch.unsqueeze(y,0)
+                
         # x shape [nb_channels, nb_time_frames]
         return x, phoneme, y
 

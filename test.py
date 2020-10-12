@@ -51,32 +51,10 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 n_hop=results['args']['nhop'],
                 nb_channels=results['args']['nb_channels'],
                 hidden_size=results['args']['hidden_size'],
-                max_bin=max_bin,
-                single_phoneme=results['args']['single_phoneme']
+                max_bin=max_bin
             )
             unmix.stft.center = True
             unmix.phoneme_network.center = True
-                    
-        if results['args']['modelname'] == 'deep-u-net':
-            unmix = deep_u_net.Deep_u_net(
-                normalization_style=results['args']['normalization_style'],
-                n_fft=results['args']['nfft'],
-                n_hop=results['args']['nhop'],
-                nb_channels=results['args']['nb_channels'],
-                single_phoneme=results['args']['single_phoneme']
-            )
-            unmix.stft.center = True
-            unmix.phoneme_network.center = True
-        
-        if results['args']['modelname'] == 'convtasnet':
-            unmix = convtasnet.ConvTasNet(
-                normalization_style=results['args']['normalization_style'],
-                nb_channels=results['args']['nb_channels'],
-                sample_rate=16000,
-                C=2 if results['args']['joint'] else 1,
-                single_phoneme=results['args']['single_phoneme']
-            )
-            
             
         unmix.load_state_dict(state) # Load saved model
         unmix.eval()
@@ -85,7 +63,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
         return unmix,results
 
 
-def istft(X, rate=44100, n_fft=4096, n_hopsize=1024):
+def istft(X, rate=16000, n_fft=1536, n_hopsize=768):
     t, audio = scipy.signal.istft(
         X / (n_fft / 2),
         rate,
@@ -152,15 +130,6 @@ def separate(
         mixture = torch.tensor(audio.T[None, ...]).float().to(device)
         # mixture shape [1,2,nb_time_points]
         
-        single_phoneme = len(phoneme.shape) == 1
-        
-        # At the front, we add one a frame of 0 due to the missing frame at the front
-        # time_transform_posteriograms.timeTransform is built for this behavior
-        # We add some zeros at the end just in case
-        if single_phoneme:
-            phoneme = torch.cat((torch.zeros(1),phoneme,torch.zeros(5)),dim=0)
-        else:
-            phoneme = torch.cat((torch.zeros(1,64),phoneme,torch.zeros(5,64)),dim=0)
         
         # add batch dimension
         phoneme = phoneme[None,...].to(device)
@@ -184,39 +153,30 @@ def separate(
                 mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
             
             # add padding to the mixture to have a complete window for the last frame
-            if modelname in ('open-unmix', 'deep-u-net'):
+            if modelname in ('open-unmix'):
                 mixture, padding = utils.pad_for_stft(mixture,args['args']['nhop'])
             
             Vj = unmix_target(mixture,phoneme,offset).cpu().detach().numpy()
             
             # Revert to channel dimension if mono model
             if nb_channels_model == 1: 
-                if modelname in ('open-unmix', 'deep-u-net'):
+                if modelname in ('open-unmix'):
                     Vj = Vj.reshape(Vj.shape[0],1,2,-1)
                     # out [nb_frames, 1, 2, nb_bins]
-                elif modelname in ('convtasnet'):
-                    Vj = Vj.transpose(2,1,0,3)
-                    # out [1, C, nb_channels, nb_timesteps]
-            
+
             source_names += [target]
             
-            if modelname in ('open-unmix', 'deep-u-net') and softmask:
+            if modelname in ('open-unmix') and softmask:
                 # only exponentiate the model if we use softmask
                 Vj = Vj**alpha
     
-            
-            if modelname in ('open-unmix','deep-u-net'):
+            if modelname in ('open-unmix'):
                 V.append(Vj[:, 0, ...])  # remove sample dim
-            if modelname in ('convtasnet'):
-                V.append(Vj[0,0].T/np.max(np.abs(Vj[0,0]))) # voice
-                if args['args']['joint']:
-                    source_names.append('accompaniment')
-                    V.append(Vj[0,1].T/np.max(np.abs(Vj[0,1]))) # accompaniment
         
         
         estimates = {}
         
-        if modelname in ('open-unmix','deep-u-net'):
+        if modelname in ('open-unmix'):
             V = np.transpose(np.array(V), (1, 3, 2, 0))
             #V mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
             
@@ -248,23 +208,7 @@ def separate(
                     audio_hat = audio_hat[...,:-padding] 
                 
                 estimates[name] = audio_hat.T
-        
-        if modelname == 'deep-u-net': # without wiener filtering
-            phase_audio = np.angle(X)[...,np.newaxis]
-            Y = phase_audio * V
-            
-            for j, name in enumerate(source_names):
-                audio_hat = istft(
-                    Y[..., j].T,
-                    n_fft=unmix_target.stft.n_fft,
-                    n_hopsize=unmix_target.stft.n_hop
-                )
-                estimates[name] = audio_hat.T
-        
-        if modelname == 'convtasnet':
-            for j, name in enumerate(source_names):
-                estimates[name] = V[j]
-        
+    
     return estimates
 
 

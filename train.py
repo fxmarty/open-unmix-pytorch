@@ -1,7 +1,6 @@
 import argparse
 
 from models import open_unmix
-from models import convtasnet
 
 import data
 import utils
@@ -42,7 +41,6 @@ from matplotlib.lines import Line2D
 import torchsnooper
 import time
 
-
 # Overright SummaryWriter so that hparams is in the same subfolder as the rest
 class SummaryWriter(SummaryWriter):
     def add_hparams(self, hparam_dict, metric_dict):
@@ -51,39 +49,11 @@ class SummaryWriter(SummaryWriter):
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
 
-        #logdir = self._get_file_writer().get_logdir()
-
         self.file_writer.add_summary(exp)
         self.file_writer.add_summary(ssi)
         self.file_writer.add_summary(sei)
         for k, v in metric_dict.items():
             self.add_scalar(k, v)
-
-def plot_grad_flow(named_parameters,i):
-    ave_grads = []
-    layers = []
-    for n, p in named_parameters:
-        if(p.requires_grad) and ("bias" not in n):
-            layers.append(n)
-            ave_grads.append(p.grad.abs().mean())
-    fig, ax = plt.subplots()
-    plt.plot(ave_grads, color="blue",linewidth=0.7)
-    plt.hlines(0, 0, len(ave_grads)+1, linewidth=0.5, color="blue" )
-    #plt.rcParams['xtick.labelsize']=4
-    plt.xticks(range(0,len(ave_grads), 1), layers,rotation="vertical",fontsize=3)
-    #plt.rcParams['xtick.labelsize']=4
-    plt.xlim(xmin=0, xmax=len(ave_grads))
-    """
-    for xc in range(len(ave_grads)):
-        plt.axvline(x=xc)
-    """
-    plt.xlabel("Layers")
-    plt.ylabel("average gradient")
-    plt.title("Gradient flow")
-    plt.grid(True)
-    plt.savefig('TESTGRAD'+str(i)+'.png',dpi=600,bbox_inches='tight',pad_inches=0.7)
-    plt.close("all")
-    plt.clf()
 
 tqdm.monitor_interval = 0
 batch_seen = 0
@@ -103,41 +73,19 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         
         sys.stdout.write("\rBatch number %i" % i)
         sys.stdout.flush()
-        if model_name_general in ('open-unmix', 'deep-u-net'):
+        if model_name_general in ('open-unmix'):
             Y_hat = unmix(x,phoneme)
             Y = unmix.transform(y)
 
-            if model_name_general == 'open-unmix':
-                loss = torch.nn.functional.mse_loss(Y_hat, Y)
-            
-            if model_name_general == 'deep-u-net':
-                loss = torch.nn.functional.l1_loss(Y_hat, Y)
+            loss = torch.nn.functional.mse_loss(Y_hat, Y)
             
             losses.update(loss.item(), Y.size(1))
         
-        if model_name_general == 'convtasnet':
-            y_hat = unmix(x,phoneme)
-            
-            loss = 0
-            for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                loss = loss + loss_SI_SDR(sisdr_framewise(y_hat[:,j,...],y[:,j,...],
-                                                unmix.sp_rate,eps=1e-8),eps=1e-8)
-            
-            torch.nn.utils.clip_grad_norm_(unmix.parameters(), max_norm=5)
-            losses.update(loss.item(), x.size(0))
-            
         i = i + 1
         loss.backward()
         optimizer.step()
 
-        try:
-            del y_hat
-        except: 
-            pass
-        try:
-            del Y_hat
-        except: 
-            pass
+        del Y_hat
         del x
         del y
         del phoneme
@@ -153,35 +101,15 @@ def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
     with torch.no_grad():
         for x, phoneme, y in valid_sampler:
             x, phoneme, y = x.to(device), phoneme.to(device), y.to(device)
-            
-            if model_name_general in ('open-unmix', 'deep-u-net'):
+            if model_name_general in ('open-unmix'):
                 Y_hat = unmix(x,phoneme)
                 Y = unmix.transform(y)
                 
-                if model_name_general == 'open-unmix':
-                    loss = torch.nn.functional.mse_loss(Y_hat, Y)
-                
-                if model_name_general == 'deep-u-net':
-                    loss = torch.nn.functional.l1_loss(Y_hat, Y)
+                loss = torch.nn.functional.mse_loss(Y_hat, Y)
                 
                 losses.update(loss.item(), Y.size(1))
             
-            if model_name_general == 'convtasnet':
-                y_hat = unmix(x,phoneme)
-                loss = 0
-                for j in range(y.shape[1]): # add up SI-SNR for the different estimates
-                    loss = loss + loss_SI_SDR(sisdr_framewise(y_hat[:,j,...],y[:,j,...],
-                                                unmix.sp_rate,eps=1e-8),eps=1e-8)
-                
-                losses.update(loss.item(), x.size(0))
-            try:
-                del y_hat
-            except: 
-                pass
-            try:
-                del Y_hat
-            except: 
-                pass
+            del Y_hat
             del x
             del y
             torch.cuda.empty_cache()
@@ -220,74 +148,82 @@ def get_statistics(args, dataset):
     return scaler.mean_, std
 
 def main():
-    #torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     
     parser = argparse.ArgumentParser(description='Open Unmix Trainer')
 
     # which target do we want to train?
     parser.add_argument('--target', type=str, default='vocals',
                         help='target source (will be passed to the dataset)')
-
-    # Dataset paramaters
-    parser.add_argument('--dataset', type=str, default="musdb",
-                        choices=[
-                            'musdb', 'aligned', 'sourcefolder',
-                            'trackfolder_var', 'trackfolder_fix'
-                        ],
-                        help='Name of the dataset.')
+    
     parser.add_argument('--root', type=str, help='root path of dataset')
     
-    parser.add_argument('--root-phoneme', type=str, help='root path of .pt phonemes, at acoustic model resolution')
+    # BEWARE: at the STFT time resolution
+    parser.add_argument('--root-phoneme', type=str, help='root path of .pt phonemes')
     
     parser.add_argument('--output', type=str, default="open-unmix",
                         help='provide output path base folder name')
+    
     parser.add_argument('--model', type=str, help='Path to checkpoint folder')
 
     # Trainig Parameters
     parser.add_argument('--epochs', type=int, default=1000)
+    
     parser.add_argument('--batch-size','--batch_size', type=int, default=16)
+
     parser.add_argument('--lr', type=float, default=0.001,
                         help='learning rate, defaults to 1e-3')
+    
     parser.add_argument('--patience', type=int, default=140,
                         help='maximum number of epochs to train without improvement of the validation loss(default: 140)')
+    
     parser.add_argument('--lr-decay-patience','--lr_decay_patience',type=int,
                         default=80, help='lr decay patience for plateau scheduler')
+                        
     parser.add_argument('--lr-decay-gamma','--lr_decay_gamma', type=float,
                         default=0.3, help='gamma of learning rate scheduler decay')
     parser.add_argument('--weight-decay','--weight_decay', type=float,
                         default=0.00001,help='weight decay')
-    parser.add_argument('--seed', type=int, default=42, metavar='S',
-                        help='random seed (default: 42)')
+    
+    parser.add_argument('--seed', type=int, default=1, metavar='S',
+                        help='random seed')
 
     # Model Parameters
     parser.add_argument('--seq-dur','--seq_dur', type=float, default=6.0,
                         help='Sequence duration in seconds'
                         'value of <=0.0 will use full/variable length')
+    
     parser.add_argument('--unidirectional', action='store_true', default=False,
                         help='Use unidirectional LSTM instead of bidirectional')
-    parser.add_argument('--nfft', type=int, default=4096,
+    
+    # corresponds to 0.032 s at 16 kHz
+    parser.add_argument('--nfft', type=int, default=512,
                         help='STFT fft size and window size')
-    parser.add_argument('--nhop', type=int, default=1024,
+    
+    # corresponds to 0.016 s at 16 kHz
+    parser.add_argument('--nhop', type=int, default=256,
                         help='STFT hop size')
+    
     parser.add_argument('--hidden-size','--hidden_size', type=int, default=512,
                         help='hidden size parameter of dense bottleneck layers')
-    parser.add_argument('--bandwidth', type=int, default=16000,
-                        help='maximum model bandwidth in herz')
+    
     parser.add_argument('--nb-channels','--nb_channels', type=int, default=2,
                         help='set number of channels for model (1, 2)')
+    
     parser.add_argument('--nb-workers','--nb_workers', type=int, default=0,
                         help='Number of workers for dataloader.')
 
     # Misc Parameters
     parser.add_argument('--quiet', action='store_true', default=False,
                         help='less verbose during training')
+    
     parser.add_argument('--no-cuda','--no_cuda', action='store_true',
                         default=False, help='disables CUDA training')
     
     parser.add_argument(
         '--modelname',
-        choices=['open-unmix', 'deep-u-net','convtasnet'],
+        choices=['open-unmix'],
         type=str,
         help='model name, used to modify the training procedure accordingly'
     )
@@ -302,10 +238,6 @@ def main():
     parser.add_argument('--tb', default=None,
                         help='use tensorboard, and if so, set name')
 
-    parser.add_argument('--joint',
-                        action='store_true',
-                        help='Train jointly for vocals and accompaniment (convtasnet)')
-    
     parser.add_argument('--fake',
                         action='store_true',
                         help='Input fake constant phoneme')
@@ -326,29 +258,20 @@ def main():
                         action='store_false',
                         help='Disable random channel selection for each target in the dataset')
     
-    parser.add_argument('--single-phoneme',
-                        action='store_true',
-                        help='Indicates that the inputed phoneme is given as ONE phoneme per frame, and not 64')
-    
     args, _ = parser.parse_known_args()
     
     # Make normalization-style argument not mendatory
     if args.normalization_style == None and args.modelname == 'open-unmix':
         parser.set_defaults(normalization_style='overall')
-    
-    if args.normalization_style == None and args.modelname == 'deep-u-net':
-        parser.set_defaults(normalization_style='batch-specific')
-    
-    if args.normalization_style == None and args.modelname == 'convtasnet':
-        parser.set_defaults(normalization_style='none')
-    
+        
     # Update args according to the two conditions above
     args, _ = parser.parse_known_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     print("Using GPU:", use_cuda)
     print("Using Torchaudio: ", utils._torchaudio_available())
     
-    dataloader_kwargs = {'num_workers': args.nb_workers, 'pin_memory': True} if use_cuda else {}
+    dataloader_kwargs = {'num_workers': args.nb_workers, 
+                        'pin_memory': True} if use_cuda else {}
 
     repo_dir = os.path.abspath(os.path.dirname(__file__))
     repo = Repo(repo_dir)
@@ -368,24 +291,6 @@ def main():
     target_path = Path(args.output)
     target_path.mkdir(parents=True, exist_ok=True)
     
-    print("Be warned that in the parser, if action='store_false' is used, parameter.cfg file will be broken.")
-    
-    # Save parameters sorted by line, to e.g. easily reuse them later
-    with open(Path(target_path,  'parameters.cfg'), 'w') as outfile:
-        arglist = []
-        for arg in vars(args):
-            value = getattr(args, arg)
-            if value is not None and value != False and value != True:
-                arglist.append("--"+arg+" "+ str(getattr(args, arg)) + "\n")
-            if value == True:
-                arglist.append("--"+arg+"\n")
-        arglist.sort()
-        for arg in arglist:
-            outfile.write(arg)
-
-    if args.modelname == 'deep-u-net':
-        print("WARNING: Be warned that the sequence length may have been overridden.")
-        
     print("Sampling rate of dataset:",train_dataset.sample_rate,"Hz")
     print("Size validation set:",len(valid_dataset),"(",len(valid_dataset.mus.tracks),
             "*",valid_dataset.samples_per_track,", number of tracks * samples per track)")
@@ -411,10 +316,6 @@ def main():
         **dataloader_kwargs
     )
     
-    max_bin = utils.bandwidth_to_max_bin(
-        train_dataset.sample_rate, args.nfft, args.bandwidth
-    ) # to stay under 16 000 Hz
-    
     if args.model or args.normalization_style in ('batch-specific','none'):
         scaler_mean = None
         scaler_std = None
@@ -431,41 +332,9 @@ def main():
             hidden_size=args.hidden_size,
             n_fft=args.nfft,
             n_hop=args.nhop,
-            max_bin=max_bin,
-            sample_rate=train_dataset.sample_rate,
-            single_phoneme=args.single_phoneme
-        ).to(device)
-        
-    elif args.modelname == 'deep-u-net':
-        unmix = deep_u_net.Deep_u_net(
-            normalization_style=args.normalization_style,
-            n_fft=args.nfft,
-            n_hop=args.nhop,
-            nb_channels=args.nb_channels,
-            input_mean=scaler_mean,
-            input_scale=scaler_std,
-            max_bin=max_bin,
             sample_rate=train_dataset.sample_rate
         ).to(device)
-    
-    elif args.modelname == 'convtasnet':
-        if args.nb_channels == 2:
-            raise ValueError("ConvTasNet should not be trained with stereo signals.")
-        
-        if args.joint == True:
-            C = 2
-        else:
-            C = 1
-        
-        unmix = convtasnet.ConvTasNet(
-            normalization_style=args.normalization_style,
-            sample_rate=train_dataset.sample_rate,
-            nb_channels=args.nb_channels,
-            C=C, # If jointly, one for the target and one for the rest
-            single_phoneme=args.single_phoneme
-        ).to(device)
-    
-    
+
     optimizer = torch.optim.Adam(
         unmix.parameters(),
         lr=args.lr,
@@ -494,7 +363,6 @@ def main():
         writerValidationLoss = SummaryWriter(log_dir=validDirName)
         
         argsCopyDict = vars(copy.deepcopy(args))
-        del argsCopyDict['dataset']
         del argsCopyDict['output']
         del argsCopyDict['model']
         del argsCopyDict['seed']

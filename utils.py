@@ -3,7 +3,33 @@ import torch
 import os
 import numpy as np
 import math
-    
+
+def plot_grad_flow(named_parameters,i):
+    ave_grads = []
+    layers = []
+    for n, p in named_parameters:
+        if(p.requires_grad) and ("bias" not in n):
+            layers.append(n)
+            ave_grads.append(p.grad.abs().mean())
+    fig, ax = plt.subplots()
+    plt.plot(ave_grads, color="blue",linewidth=0.7)
+    plt.hlines(0, 0, len(ave_grads)+1, linewidth=0.5, color="blue" )
+    #plt.rcParams['xtick.labelsize']=4
+    plt.xticks(range(0,len(ave_grads), 1), layers,rotation="vertical",fontsize=3)
+    #plt.rcParams['xtick.labelsize']=4
+    plt.xlim(xmin=0, xmax=len(ave_grads))
+    """
+    for xc in range(len(ave_grads)):
+        plt.axvline(x=xc)
+    """
+    plt.xlabel("Layers")
+    plt.ylabel("average gradient")
+    plt.title("Gradient flow")
+    plt.grid(True)
+    plt.savefig('TESTGRAD'+str(i)+'.png',dpi=600,bbox_inches='tight',pad_inches=0.7)
+    plt.close("all")
+    plt.clf()
+
 def pad_for_stft(signal, hop_length):
     """
     this function pads the given signal so that all samples are taken into account by the stft
@@ -20,26 +46,9 @@ def pad_for_stft(signal, hop_length):
         signal = torch.nn.functional.pad(signal, pad=(0, pad_length))
         return signal,pad_length
 
-    
+
 def memory_check(comment):
     print(comment,torch.cuda.memory_reserved(0)*1e-9, "GB out of",torch.cuda.get_device_properties(0).total_memory*1e-9, "GB used.")
-
-# Returns true if no time steps left over in a Conv1d.
-def checkValidConvolution(input_size,kernel_size,stride=1,padding=0,dilation=1,note=""):
-    print(note,((input_size + 2*padding - dilation * (kernel_size - 1) - 1)/stride
-            + 1).is_integer())
-
-def valid_length(input_size,kernel_size,stride=1,padding=0,dilation=1):
-    """
-    Return the nearest valid length to use with the model so that
-    there is no time steps left over in a a 1dConv, e.g. for all
-    layers, size of the (input - kernel_size) % stride = 0.
-    """
-    #length = math.ceil((input_size + 2*padding - dilation * (kernel_size - 1) - 1)/stride) + 1
-    length = math.ceil(torch.true_divide(input_size + 2*padding - dilation * (kernel_size - 1) - 1,stride).item()) + 1
-    length = (length - 1) * stride - 2*padding + dilation * (kernel_size - 1) + 1
-
-    return int(length)
 
 
 def _sndfile_available():
@@ -145,17 +154,6 @@ def load_audio(path, start=0, dur=None):
     loader = get_loading_backend()
     return loader(path, start=start, dur=dur)
 
-
-def bandwidth_to_max_bin(rate, n_fft, bandwidth):
-    freqs = np.linspace(
-        0, float(rate) / 2, n_fft // 2 + 1,
-        endpoint=True
-    )
-    #print(freqs[1480:1490])
-    #print(np.where(freqs <= bandwidth)[0])
-    return np.max(np.where(freqs <= bandwidth)[0]) + 1
-
-
 def save_checkpoint(
     state, is_best, path, target
 ):
@@ -170,7 +168,6 @@ def save_checkpoint(
             state['state_dict'],
             os.path.join(path, target + '.pth')
         )
-
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
