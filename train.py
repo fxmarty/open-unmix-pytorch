@@ -55,7 +55,6 @@ class SummaryWriter(SummaryWriter):
         for k, v in metric_dict.items():
             self.add_scalar(k, v)
 
-tqdm.monitor_interval = 0
 batch_seen = 0
 
 #@torchsnooper.snoop()
@@ -82,6 +81,7 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
             losses.update(loss.item(), Y.size(1))
         
         i = i + 1
+
         loss.backward()
         optimizer.step()
 
@@ -147,10 +147,7 @@ def get_statistics(args, dataset):
     )
     return scaler.mean_, std
 
-def main():
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    
+def main():    
     parser = argparse.ArgumentParser(description='Open Unmix Trainer')
 
     # which target do we want to train?
@@ -264,8 +261,21 @@ def main():
     if args.normalization_style == None and args.modelname == 'open-unmix':
         parser.set_defaults(normalization_style='overall')
         
-    # Update args according to the two conditions above
+    # Update args according to the conditions above
     args, _ = parser.parse_known_args()
+    
+    # enforce deterministic behavior
+    def seed_all(seed):
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.cuda.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
+    seed_all(args.seed)
+    
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     print("Using GPU:", use_cuda)
     print("Using Torchaudio: ", utils._torchaudio_available())
@@ -276,11 +286,6 @@ def main():
     repo_dir = os.path.abspath(os.path.dirname(__file__))
     repo = Repo(repo_dir)
     commit = repo.head.commit.hexsha[:7]
-
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
-    random.seed(args.seed)
-    np.random.seed(args.seed)
 
     device = torch.device("cuda" if use_cuda else "cpu")
     
@@ -298,11 +303,12 @@ def main():
             "*",train_dataset.samples_per_track,", number of tracks * samples per track)")
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
     
+    # called at every epoch, where initial_seed is different at every epoch and for
+    # every worker.
     def _init_fn(worker_id):
-        torch.manual_seed(args.seed + worker_id) 
-        torch.cuda.manual_seed(args.seed + worker_id)
-        random.seed(args.seed + worker_id)
-        np.random.seed(args.seed + worker_id)
+        worker_seed = torch.initial_seed() % 2**32
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
     
     train_sampler = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
@@ -373,8 +379,7 @@ def main():
         del argsCopyDict['is_wav']
         del argsCopyDict['source_augmentations']
         writerTrainLoss.add_hparams(argsCopyDict,{'hparam/losss': 1})
-                
-    #memory_check("Memory before starting the training:")
+    
     
     # if a model is specified: resume training
     if args.model:
@@ -414,7 +419,7 @@ def main():
         end = time.time()
         
         for param_group in optimizer.param_groups:
-            print(param_group['lr'])
+            print("Learning rate:", param_group['lr'])
 
         train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
         valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)

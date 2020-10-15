@@ -79,3 +79,53 @@ class Spectrogram(nn.Module):
         
         # permute output for LSTM convenience
         return stft_f.permute(2, 0, 1, 3)
+
+if __name__ == '__main__':
+    
+    import utils
+    import test
+    
+    nfft = 512
+    nhop = 256
+    
+    data = torch.zeros((1,2,6*16000 + 123))
+    print(data.shape)
+    
+    pad_length = 0
+    data,pad_length = utils.pad_for_stft(data, nhop)
+    print(data.shape)
+    
+    stftNoCenter = STFT(center=False,n_fft=nfft,n_hop=nhop)
+    stftWithCenter = STFT(center=True,n_fft=nfft,n_hop=nhop)
+        
+    res_noCenter = stftNoCenter(data).cpu().numpy()
+    res_withCenter = stftWithCenter(data).cpu().numpy()
+    
+    res_noCenter = res_noCenter[..., 0] + res_noCenter[..., 1]*1j
+    res_noCenter = res_noCenter[0].transpose(2, 1, 0)
+    
+    res_withCenter = res_withCenter[..., 0] + res_withCenter[..., 1]*1j
+    res_withCenter = res_withCenter[0].transpose(2, 1, 0)
+    
+    padding = int(nfft//2)
+    
+    th_nopad = (data.shape[-1] - (nfft - 1) - 1)/nhop + 1
+    
+    th_pad = (data.shape[-1] + 2*padding - (nfft - 1) - 1)/nhop + 1
+    print("Theorical output without Center:",th_nopad)
+    print("Theorical output shape with Center:",th_pad)
+    
+    print("No center",res_noCenter.shape)
+    print("With center",res_withCenter.shape)
+    
+    print("-- istft --")
+    istft_noCenter = test.istft(res_noCenter.T,n_fft=nfft,n_hopsize=nhop)
+    istft_withCenter = test.istft(res_withCenter.T,n_fft=nfft,n_hopsize=nhop)
+    
+    print("No center",istft_noCenter.shape)
+    print("With center",istft_withCenter.shape)
+    
+    if pad_length > 0:
+        print("-- istft unpadded --")
+        print("No center",istft_noCenter[...,:-pad_length].shape)
+        print("With center",istft_withCenter[...,:-pad_length].shape)

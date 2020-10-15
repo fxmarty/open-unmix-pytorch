@@ -35,16 +35,8 @@ def evalTargets(joint,args,device):
     
     for track in tqdm.tqdm(mus.tracks):
         print(track.name)
-
-        phoneme = np.load(args.root_phoneme+'/'
-                                +'test'+'_'+track.name+'.npy')
-        phoneme = torch.from_numpy(phoneme)
-        
-        if args.fake:
-            phoneme = torch.zeros(phoneme.shape)
-            if len(phoneme.shape) == 2: # if 64 phonemes
-                phoneme[...,0] = 1
-        
+        phoneme = torch.load(args.root_phoneme+'/'
+                                +'test'+'_'+track.name+'.pt')
         
         estimates = test.separate(
             audio=track.audio, # shape [nb_time_points, 2]
@@ -54,8 +46,7 @@ def evalTargets(joint,args,device):
             niter=args.niter,
             alpha=args.alpha,
             softmask=args.softmask,
-            device=device,
-            offset=0
+            device=device
         )
         
         if args.outdir:
@@ -66,7 +57,7 @@ def evalTargets(joint,args,device):
         
         if vocals.shape != estimated_vocals.shape:
             raise ValueError("Targets and estimates should have the same shape!")
-
+        
         vocals_SISDR = sisdr_framewise(estimated_vocals,vocals,
                                         sample_rate=track.rate,eps=0)
         vocals_SDR = ideal_SDR_framewise(estimated_vocals,vocals,sample_rate=track.rate)
@@ -89,16 +80,11 @@ def evalTargets(joint,args,device):
         frame_list = []
         
         for i,k in enumerate(vocals_SISDR):
-            if joint:
-                frame_list.append({"time" : float(i), "duration" : 1.0,
-                            "metrics" : {"SI-SDR_vocals" : -vocals_SISDR[i].item(),
-                            "SI-SDR_accompaniment" : -accompaniment_SISDR[i].item(),
-                            "SDR_vocals" : -vocals_SDR[i].item(),
-                            "SDR_accompaniment" : -accompaniment_SDR[i].item()}})
-            else:
-                frame_list.append({"time" : float(i), "duration" : 1.0,
-                            "metrics" : {"SISDR_vocals" : -vocals_SISDR[i].item(),
-                            "SDR_vocals" : -vocals_SDR[i].item()}})
+            frame_list.append({"time" : float(i), "duration" : 1.0,
+                        "metrics" : {"SI-SDR_vocals" : -vocals_SISDR[i].item(),
+                        "SI-SDR_accompaniment" : -accompaniment_SISDR[i].item(),
+                        "SDR_vocals" : -vocals_SDR[i].item(),
+                        "SDR_accompaniment" : -accompaniment_SDR[i].item()}})
         
         # median over windows
         vocals_SISDR = vocals_SISDR[torch.isfinite(vocals_SISDR)]
@@ -113,19 +99,19 @@ def evalTargets(joint,args,device):
         medians = [{"median_SISDR_vocals" : -median_SISDR_vocals,
                     "median_SDR_vocals" : -median_SDR_vocals}]
         
-        if joint:
-            accompaniment_SISDR = accompaniment_SISDR[torch.isfinite(accompaniment_SISDR)]
-            accompaniment_SDR = accompaniment_SDR[torch.isfinite(accompaniment_SDR)]
-            
-            median_SISDR_accompaniment = np.median(accompaniment_SISDR.numpy())
-            median_SDR_accompaniment = np.median(accompaniment_SDR.numpy())
-            
-            SI_SDRscores_accompaniment.append(-median_SISDR_accompaniment)
-            SDRscores_accompaniment.append(-median_SDR_accompaniment)
-            
-            medians[0]["median_SISDR_accompaniment"] = -median_SISDR_accompaniment
-            medians[0]["median_SDR_accompaniment"] = -median_SDR_accompaniment
-                
+        accompaniment_SISDR = accompaniment_SISDR[torch.isfinite(accompaniment_SISDR)]
+        accompaniment_SDR = accompaniment_SDR[torch.isfinite(accompaniment_SDR)]
+        
+        median_SISDR_accompaniment = np.median(accompaniment_SISDR.numpy())
+        median_SDR_accompaniment = np.median(accompaniment_SDR.numpy())
+        
+        SI_SDRscores_accompaniment.append(-median_SISDR_accompaniment)
+        SDRscores_accompaniment.append(-median_SDR_accompaniment)
+        
+        medians[0]["median_SISDR_accompaniment"] = -median_SISDR_accompaniment
+        medians[0]["median_SDR_accompaniment"] = -median_SDR_accompaniment
+        
+        
         with open(args.evaldir+'/'+track.name+'.json', 'w') as outfile:
             json.dump([medians,frame_list], outfile, indent=2)
         
@@ -201,11 +187,7 @@ if __name__ == '__main__':
         action='store_true', default=False,
         help='flags wav version of the dataset'
     )
-    
-    parser.add_argument('--fake',
-                        action='store_true',
-                        help='Input fake constant phoneme')
-    
+        
     args, _ = parser.parse_known_args()
     args = test.inference_args(parser, args)
 

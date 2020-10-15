@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import scipy.signal
 import resampy
+import math
 
 from models import open_unmix
 
@@ -37,21 +38,13 @@ def load_model(target, model_name='umxhq', device='cpu'):
             map_location=device
         )
         
-        max_bin = utils.bandwidth_to_max_bin(
-            state['sample_rate'],
-            results['args']['nfft'],
-            results['args']['bandwidth']
-        ) # returns the number of frequency bins so that their frequency is lower
-        # than the bandwidth indicated in the .json files
-
         if results['args']['modelname'] == 'open-unmix':
             unmix = open_unmix.OpenUnmix(
                 normalization_style=results['args']['normalization_style'],
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
                 nb_channels=results['args']['nb_channels'],
-                hidden_size=results['args']['hidden_size'],
-                max_bin=max_bin
+                hidden_size=results['args']['hidden_size']
             )
             unmix.stft.center = True
             unmix.phoneme_network.center = True
@@ -63,7 +56,7 @@ def load_model(target, model_name='umxhq', device='cpu'):
         return unmix,results
 
 
-def istft(X, rate=16000, n_fft=1536, n_hopsize=768):
+def istft(X, rate=16000, n_fft=512, n_hopsize=256):
     t, audio = scipy.signal.istft(
         X / (n_fft / 2),
         rate,
@@ -80,8 +73,7 @@ def separate(
     targets,
     model_name='umxhq',
     niter=1, softmask=False, alpha=1.0,
-    residual_model=False, device='cpu',
-    offset=0
+    residual_model=False, device='cpu'
 ):
     """
     Performing the separation on audio input
@@ -130,6 +122,15 @@ def separate(
         mixture = torch.tensor(audio.T[None, ...]).float().to(device)
         # mixture shape [1,2,nb_time_points]
         
+        # we crop the end of the phoneme to fit track length,
+        # because Andrea padded the end in his method
+        nb_time_points = mixture.shape[2]
+        nb_phoneme_frames = math.ceil((nb_time_points - 512)/256 + 1)
+        phoneme = phoneme[:nb_phoneme_frames]
+        
+        # this is because 'center=True' option from STFT adds n_fft/2 padding
+        # at the beginning and end, correspondig to one phoneme frame
+        phoneme = torch.cat([torch.zeros(1,65),phoneme,torch.zeros(1,65)],dim=0)
         
         # add batch dimension
         phoneme = phoneme[None,...].to(device)
@@ -152,11 +153,15 @@ def separate(
             if nb_channels_model == 1: 
                 mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
             
+            if args['args']['fake'] == True:
+                phoneme = torch.zeros(phoneme.shape).to(device)
+                phoneme[...,10] = 1
+            
             # add padding to the mixture to have a complete window for the last frame
             if modelname in ('open-unmix'):
                 mixture, padding = utils.pad_for_stft(mixture,args['args']['nhop'])
             
-            Vj = unmix_target(mixture,phoneme,offset).cpu().detach().numpy()
+            Vj = unmix_target(mixture,phoneme).cpu().detach().numpy()
             
             # Revert to channel dimension if mono model
             if nb_channels_model == 1: 
@@ -173,7 +178,6 @@ def separate(
             if modelname in ('open-unmix'):
                 V.append(Vj[:, 0, ...])  # remove sample dim
         
-        
         estimates = {}
         
         if modelname in ('open-unmix'):
@@ -181,7 +185,7 @@ def separate(
             #V mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
             
             X = unmix_target.stft(mixture).detach().cpu().numpy()
-    
+            
             # convert to complex numpy type
             X = X[..., 0] + X[..., 1]*1j
             X = X[0].transpose(2, 1, 0)
@@ -193,7 +197,7 @@ def separate(
                 source_names += (['residual'] if len(targets) > 1
                                 else ['accompaniment'])
             
-            Y = norbert.wiener(V, X.astype(np.complex128), niter,
+            Y = norbert.wiener(V, X.astype(np.complex64), niter,
                             use_softmask=softmask)
             # Y shape (nb_frames, nb_bins, 2, nb_targets), complex
             
@@ -245,7 +249,7 @@ def inference_args(parser, remaining_args):
     inf_parser.add_argument(
         '--samplerate',
         type=int,
-        default=44100,
+        default=16000,
         help='model samplerate'
     )
 
@@ -258,9 +262,9 @@ def inference_args(parser, remaining_args):
 
 
 def test_main(
-    input_files=None, samplerate=44100, niter=1, alpha=1.0,
-    softmask=False, residual_model=False, model='umxhq',
-    targets=('vocals', 'drums', 'bass', 'other'),
+    input_files=None, phoneme_path=None, samplerate=16000,
+    niter=1, alpha=1.0, softmask=False, residual_model=False,
+    model='umxhq', targets=('vocals', 'drums', 'bass', 'other'),
     outdir=None, start=0.0, duration=-1.0, no_cuda=False):
 
     use_cuda = not no_cuda and torch.cuda.is_available()
@@ -292,16 +296,19 @@ def test_main(
             audio = audio[:, :2]
 
         if rate != samplerate:
-            warnings.warn('Sample rate indicated different than real!')
+            warnings.warn('Sample rate indicated different than file samplerate!')
             # resample to model samplerate if needed
             audio = resampy.resample(audio, rate, samplerate, axis=0)
 
         if audio.shape[1] == 1:
             # if we have mono, let's duplicate it
             audio = np.repeat(audio, 2, axis=1)
-
+        
+        phoneme = torch.load(phoneme_path)
+        
         estimates = separate(
             audio,
+            phoneme,
             targets=targets,
             model_name=model,
             niter=niter,
@@ -348,6 +355,12 @@ if __name__ == '__main__':
         type=str,
         nargs='+',
         help='List of paths to wav/flac files.'
+    )
+    
+    parser.add_argument(
+        '--phoneme',
+        type=str,
+        help='Path to corresponding posteriogram.'
     )
 
     parser.add_argument(
@@ -397,8 +410,8 @@ if __name__ == '__main__':
     args = inference_args(parser, args)
     
     test_main(
-        input_files=args.input, samplerate=args.samplerate,
-        alpha=args.alpha, softmask=args.softmask, niter=args.niter,
-        residual_model=args.residual_model, model=args.model,
+        input_files=args.input, phoneme_path=args.phoneme,
+        alpha=args.alpha, softmask=args.softmask,
+        niter=args.niter, residual_model=args.residual_model, model=args.model,
         targets=args.targets, outdir=args.outdir, start=args.start,
         duration=args.duration, no_cuda=args.no_cuda)

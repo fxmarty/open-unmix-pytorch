@@ -25,7 +25,7 @@ def get_sec(time_str):
     return int(m) * 60 + int(s)
 
 
-def evalTargets(joint,args,device,type):
+def evalTargets(args,device,typee):
     
     root = args.root
     lyrics_folder = '/tsi/doctorants/kschulze/Datasets/MUSDB_w_lyrics/lyrics_transcripts/test'
@@ -37,7 +37,6 @@ def evalTargets(joint,args,device,type):
     SDRscores_vocals = []
     SI_SDRscores_accompaniment = []
     SDRscores_accompaniment = []
-    sub_tracks_names = []
     
     if not os.path.exists(args.evaldir):
         os.makedirs(args.evaldir)
@@ -50,9 +49,8 @@ def evalTargets(joint,args,device,type):
             song_name_short = song_name_short[0][0:6] + "_" + song_name_short[1][1:6]
             song_name_short = song_name_short.replace(" ", "_")
             
-            phoneme = np.load(args.root_phoneme+'/'
-                                    +'test'+'_'+filename.replace('.txt','.npy'))
-            phoneme = torch.from_numpy(phoneme)
+            phoneme = torch.load(args.root_phoneme+'/'
+                                    +'test'+'_'+filename.replace('.txt','.pt'))
             
             with open(lyrics_folder+'/'+filename) as f:
                 for i,line in enumerate(f):
@@ -60,7 +58,7 @@ def evalTargets(joint,args,device,type):
                     if line.startswith('*'):
                         continue
                     line = line.split(' ')
-                    if line[2] != type:
+                    if line[2] != typee:
                         continue
                     
                     start = get_sec(line[0])
@@ -75,17 +73,13 @@ def evalTargets(joint,args,device,type):
                     endFrame = math.ceil(end/0.016) - 1
                     sub_phoneme = phoneme[startFrame:endFrame+1]
                     
-                    # given to time_transform_posteriograms.py to adjust
-                    # the end time
+                    # to adjust padding at start
                     offset = start - math.floor(start/0.016)*0.016
                     
-                    if args.fake:
-                        sub_phoneme = torch.zeros(sub_phoneme.shape)
-                        if len(phoneme.shape) == 2:
-                            sub_phoneme[...,0] = 1
-                    
-                    path = root+'/mix/'+type+'/'+song_name_short+'_'+str(i)+'.pt'
+                    path = root+'/mix/'+typee+'/'+song_name_short+'_'+str(i)+'.pt'
                     mixture = torch.load(path)
+                    mixture = torch.cat([torch.zeros(2,int(offset*16000)),mixture],
+                                        dim=1)
                     
                     print(song_name_short+'_'+str(i)+'.pt')                    
                     
@@ -97,24 +91,28 @@ def evalTargets(joint,args,device,type):
                         niter=args.niter,
                         alpha=args.alpha,
                         softmask=args.softmask,
-                        device=device,
-                        offset=offset
+                        device=device
                     )
-                    
                     
                     if args.outdir:
                         if not os.path.exists(args.outdir):
                             os.makedirs(args.outdir)
-                        if not os.path.exists(args.outdir+'/'+type):
-                            os.makedirs(args.outdir+'/'+type)
+                        if not os.path.exists(args.outdir+'/'+typee):
+                            os.makedirs(args.outdir+'/'+typee)
                         
                         for target, estimate in list(estimates.items()):
-                            target_path = (args.outdir+'/'+type
-                                            +'/'+song_name_short+str(i)+'_'+target+'.wav')
-                            sf.write(target_path, estimate, 44100)
+                            target_path = (args.outdir+'/'+typee
+                                            +'/'+song_name_short+str(i)
+                                            +'_'+target+'.wav')
+                            sf.write(target_path, estimate, 16000)
 
-                    vocals = torch.load(root+'/vocals/'+type+
+                    # we pad vocals with 0 to fit estimate shape, as we padded it
+                    # before to have it start at the same time as a phoneme window
+                    vocals = torch.load(root+'/vocals/'+typee+
                                         '/'+song_name_short+'_'+str(i)+'.pt')
+                    vocals = torch.cat(
+                                [torch.zeros(2,int(offset*16000)),vocals],
+                                dim=1)
                     
                     estimated_vocals = torch.from_numpy(estimates['vocals'].T)
                     
@@ -123,53 +121,45 @@ def evalTargets(joint,args,device,type):
                                         " have the same shape!")
 
                     vocals_SISDR = sisdr_framewise(estimated_vocals,vocals,
-                                                    sample_rate=44100,eps=0)
+                                                    sample_rate=16000,eps=0)
                     vocals_SDR = ideal_SDR_framewise(estimated_vocals,
-                                                    vocals,sample_rate=44100)
-
+                                                    vocals,sample_rate=16000)
                     # mean over channels
                     vocals_SISDR = torch.mean(vocals_SISDR,dim=1)[0]
                     vocals_SDR = torch.mean(vocals_SDR,dim=1)[0]
 
-                    if joint:
-                        accompaniment = torch.load(root+'/accompaniments/'+type+
-                                                    '/'+song_name_short+'_'+str(i)+'.pt')
-                        estimated_accompaniment = torch.from_numpy(
-                                                    estimates['accompaniment'].T)
-                        accompaniment_SISDR  = sisdr_framewise(
-                                                    estimated_accompaniment,
-                                                    accompaniment,
-                                                    sample_rate=44100,
-                                                    eps=0)
-                        accompaniment_SDR  = ideal_SDR_framewise(
-                                                    estimated_accompaniment,
-                                                    accompaniment,
-                                                    sample_rate=44100)
-                        
-                        accompaniment_SISDR  = torch.mean(accompaniment_SISDR,dim=1)[0]
-                        accompaniment_SDR  = torch.mean(accompaniment_SDR,dim=1)[0]
+                    accompaniment = torch.load(root+'/accompaniments/'+typee+
+                                                '/'+song_name_short+'_'+str(i)+'.pt')
+                    accompaniment = torch.cat(
+                                [torch.zeros(2,int(offset*16000)),accompaniment],
+                                dim=1)
+                    estimated_accompaniment = torch.from_numpy(
+                                                estimates['accompaniment'].T)
+                    accompaniment_SISDR  = sisdr_framewise(
+                                                estimated_accompaniment,
+                                                accompaniment,
+                                                sample_rate=16000,
+                                                eps=0)
+                    accompaniment_SDR  = ideal_SDR_framewise(
+                                                estimated_accompaniment,
+                                                accompaniment,
+                                                sample_rate=16000)
+                    accompaniment_SISDR  = torch.mean(accompaniment_SISDR,dim=1)[0]
+                    accompaniment_SDR  = torch.mean(accompaniment_SDR,dim=1)[0]
+
 
                     frame_list = []
                     
                     for i,k in enumerate(vocals_SISDR):
-                        if joint:
-                            frame_list.append({
-                                "time" : float(i),
-                                "duration" : 1.0,
-                                "metrics" : {
-                                "SI-SDR_vocals" : -vocals_SISDR[i].item(),
-                                "SI-SDR_accompaniment" : -accompaniment_SISDR[i].item(),
-                                "SDR_vocals" : -vocals_SDR[i].item(),
-                                "SDR_accompaniment" : -accompaniment_SDR[i].item()
-                            }})
-                        else:
-                            frame_list.append({
-                                "time" : float(i),
-                                "duration" : 1.0,
-                                "metrics" : {
-                                "SISDR_vocals" : -vocals_SISDR[i].item(),
-                                "SDR_vocals" : -vocals_SDR[i].item()
-                            }})
+                        frame_list.append({
+                            "time" : float(i),
+                            "duration" : 1.0,
+                            "metrics" : {
+                            "SI-SDR_vocals" : -vocals_SISDR[i].item(),
+                            "SI-SDR_accompaniment" : -accompaniment_SISDR[i].item(),
+                            "SDR_vocals" : -vocals_SDR[i].item(),
+                            "SDR_accompaniment" : -accompaniment_SDR[i].item()
+                        }})
                     
                     # median over windows
                     vocals_SISDR = vocals_SISDR[torch.isfinite(vocals_SISDR)]
@@ -180,42 +170,41 @@ def evalTargets(joint,args,device,type):
 
                     SI_SDRscores_vocals.append(-median_SISDR_vocals)
                     SDRscores_vocals.append(-median_SDR_vocals)
-
-                    medians = [{"median_SISDR_vocals" : -median_SISDR_vocals,
-                                "median_SDR_vocals" : -median_SDR_vocals}]
-
-                    if joint:
-                        accompaniment_SISDR = accompaniment_SISDR[
-                                                torch.isfinite(accompaniment_SISDR)]
-                        accompaniment_SDR = accompaniment_SDR[
-                                                torch.isfinite(accompaniment_SDR)]
-                        
-                        median_SISDR_accompaniment = np.median(
-                                                        accompaniment_SISDR.numpy())
-                        median_SDR_accompaniment = np.median(accompaniment_SDR.numpy())
-                        
-                        SI_SDRscores_accompaniment.append(-median_SISDR_accompaniment)
-                        SDRscores_accompaniment.append(-median_SDR_accompaniment)
-                        
-                        medians[0]["median_SISDR_accompaniment"] = (
-                                                    - median_SISDR_accompaniment)
-                        medians[0]["median_SDR_accompaniment"] = (
-                                                    -median_SDR_accompaniment)
                     
                     
-                    directory = args.evaldir+'/'+type+'/'
+                    medians = [{"median_SISDR_vocals" : -median_SISDR_vocals.item(),
+                                "median_SDR_vocals" : -median_SDR_vocals.item()}]
+                    
+                    accompaniment_SISDR = accompaniment_SISDR[
+                                            torch.isfinite(accompaniment_SISDR)]
+                    accompaniment_SDR = accompaniment_SDR[
+                                            torch.isfinite(accompaniment_SDR)]
+                    
+                    median_SISDR_accompaniment = np.median(
+                                                    accompaniment_SISDR.numpy())
+                    median_SDR_accompaniment = np.median(accompaniment_SDR.numpy())
+                    
+                    SI_SDRscores_accompaniment.append(-median_SISDR_accompaniment)
+                    SDRscores_accompaniment.append(-median_SDR_accompaniment)
+                    
+                    
+                    medians[0]["median_SISDR_accompaniment"] = (
+                                                - median_SISDR_accompaniment.item())
+                    medians[0]["median_SDR_accompaniment"] = (
+                                                -median_SDR_accompaniment.item())
+                    
+                    directory = args.evaldir+'/'+typee+'/'
                     if not os.path.exists(directory):
                         os.makedirs(directory)
                     
                     with open(directory+song_name_short+str(i)+'.json', 'w') as outfile:
-                        json.dump([medians,frame_list], outfile, indent=2)
-                
-                    sub_tracks_names.append(song_name_short+str(i))
+                        todump = [medians,frame_list]
+                        json.dump(todump, outfile, indent=2)
                     
                     torch.cuda.empty_cache()
             
     return (SI_SDRscores_vocals,SDRscores_vocals,SI_SDRscores_accompaniment,
-            SDRscores_accompaniment,sub_tracks_names)
+            SDRscores_accompaniment)
 
 
 if __name__ == '__main__':
@@ -255,7 +244,7 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--root',
-        default='/tsi/doctorants/kschulze/Datasets/MUSDB_w_lyrics441/test/audio',
+        default='/tsi/doctorants/kschulze/Datasets/MUSDB_w_lyrics/test/audio',
         type=str,
         help='Path to Kilian repository'
     )
@@ -284,11 +273,7 @@ if __name__ == '__main__':
         action='store_true', default=False,
         help='flags wav version of the dataset'
     )
-    
-    parser.add_argument('--fake',
-                        action='store_true',
-                        help='Input fake constant phoneme')
-    
+        
     args, _ = parser.parse_known_args()
     args = test.inference_args(parser, args)
 
@@ -304,12 +289,7 @@ if __name__ == '__main__':
         # load model from disk, there should be only one target
         with open(Path(model_path, args.targets[0] + '.json'), 'r') as stream:
             results = json.load(stream)
-    
-    try:
-        joint = results['args']['joint']
-    except:
-        joint = True
-    
+        
     """
     types
     
@@ -324,51 +304,36 @@ if __name__ == '__main__':
     SDRscores_vocals = {}
     SI_SDRscores_accompaniment = {}
     SDRscores_accompaniment = {}
-    sub_tracks = {}
     
-    
-    for type in tqdm.tqdm(types):
-        (SI_SDRscores_vocals[type],SDRscores_vocals[type],
-        SI_SDRscores_accompaniment[type],
-        SDRscores_accompaniment[type],sub_tracks[type]) = evalTargets(joint,args,device,type)
+    for typee in tqdm.tqdm(types):
+        (SI_SDRscores_vocals[typee],SDRscores_vocals[typee],
+        SI_SDRscores_accompaniment[typee],
+        SDRscores_accompaniment[typee]) = evalTargets(args,device,typee)
         
         
-        overall_SI_SDR_vocals = np.median(np.array(SI_SDRscores_vocals[type]))
-        overall_SDR_vocals = np.median(np.array(SDRscores_vocals[type]))
-        
-        print("("+type+") SI-SDR median over windows, median over files (vocals):",
-                overall_SI_SDR_vocals)
-        print("("+type+") SDR median over windows, median over files (vocals):",
-                overall_SDR_vocals)
-        
+        overall_SI_SDR_vocals = np.median(np.array(SI_SDRscores_vocals[typee]))
+        overall_SDR_vocals = np.median(np.array(SDRscores_vocals[typee]))
         
         text_file = open(args.evaldir+"/_overall.txt", "a")
-        text_file.write("("+type+") SI-SDR for vocals (median over windows, median over files): "
+        text_file.write("("+typee+") SI-SDR for vocals (median over windows, median over files): "
                         + str(overall_SI_SDR_vocals))
         text_file.write("\n")
-        text_file.write("("+type+") SDR for vocals (median over windows, median over files): "
+        text_file.write("("+typee+") SDR for vocals (median over windows, median over files): "
                         + str(overall_SDR_vocals))
         
-        if joint:
-            overall_SI_SDR_accompaniment = np.median(np.array(SI_SDRscores_accompaniment[type]))
-            overall_SDR_accompaniment = np.median(np.array(SDRscores_accompaniment[type]))
-            
-            print("---")
-            print("("+type+") SI-SDR median over windows, median over files (accompaniment):",
-                    overall_SI_SDR_accompaniment)
-            print("("+type+") SDR median over windows, median over files (accompaniment):",
-                    overall_SDR_accompaniment)
-            
-            text_file.write("\n-\n")
-            text_file.write("("+type+") SI-SDR for accompaniment (median over windows,"
-                            +" median over files): " + str(overall_SI_SDR_accompaniment))
-            text_file.write("\n")
-            text_file.write("("+type+") SDR for accompaniment (median over windows,"
-                            " median over files): " + str(overall_SDR_accompaniment))
+        
+        overall_SI_SDR_accompaniment = np.median(np.array(SI_SDRscores_accompaniment[typee]))
+        overall_SDR_accompaniment = np.median(np.array(SDRscores_accompaniment[typee]))
+        
+        text_file.write("\n-\n")
+        text_file.write("("+typee+") SI-SDR for accompaniment (median over windows,"
+                        +" median over files): " + str(overall_SI_SDR_accompaniment))
+        text_file.write("\n")
+        text_file.write("("+typee+") SDR for accompaniment (median over windows,"
+                        " median over files): " + str(overall_SDR_accompaniment))
         
         text_file.write("\n\n")
         text_file.write("---------")
         text_file.write("\n\n")
         
     text_file.close()
-    

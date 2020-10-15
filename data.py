@@ -9,6 +9,8 @@ import tqdm
 import librosa
 import math
 
+import numpy as np
+
 import random
 
 class Compose(object):
@@ -35,6 +37,7 @@ def _augment_channelswap(audio):
         return torch.flip(audio, [0])
     else:
         return audio
+
 def load_datasets(parser, args):
     """Loads the specified dataset from commandline arguments
     
@@ -210,12 +213,14 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
     def __getitem__(self, index):
         audio_sources = []
         target_ind = None
+        
         """
         if torch.utils.data.get_worker_info() is not None:
             print(torch.utils.data.get_worker_info())
-        print(random.random())
-        print("---")
+            print(random.random())
+            print("---")
         """
+        
         # select track
         track = self.mus.tracks[index // self.samples_per_track]
 
@@ -244,8 +249,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                 
                 # load phoneme information over the track if vocals
                 if source == 'vocals':
-                    
-
                     # we DO NOT give the first overlapping phoneme window as an 
                     #input, as at inference time, we start from the beginning of 
                     # songs that do not have this information
@@ -257,7 +260,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     
                     if self.fake:
                         phoneme = torch.zeros(phoneme.shape)
-                        indice = random.randint(0,64)
+                        indice = np.random.randint(0,65)
                         phoneme[...,indice] = 1
                     
                 # load source audio and apply time domain source_augmentations
@@ -273,7 +276,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     channel_number = 0
                     if self.random_channel: channel_number = random.randint(0, 1) 
                     audio = torch.unsqueeze(audio[channel_number],0)
-
+                
                 audio_sources.append(audio)
                     
             # create stem tensor of shape (nb_sources=4, nb_channels, samples)
@@ -289,13 +292,8 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
         else:
-            #print("---")
-            #print(track.name)
-            #print(track.duration)
             track.chunk_duration = min(track.duration - 0.016,600)
-            
             nbFrames = math.floor((track.chunk_duration - 0.032)/0.016 + 1)
-            
             
             # get the non-linear source mix straight from musdb
             x = torch.tensor(
@@ -308,14 +306,13 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
             )
             
             phoneme = self.phonemes_dict[track.name][:nbFrames]
-           
-            #print("phoneme total",self.phonemes_dict[track.name].shape)
-            #print("phoneme", phoneme.shape)
-            #print("audio",x.shape)
             
             if self.fake:
                 phoneme = torch.zeros(phoneme.shape)
-                indice = random.randint(0,64)
+                # numpy has a different random stack than random, that's why we use
+                # it in the fake case to enable reproductability (same samples
+                # between fake and non-fake versions)
+                indice = np.random.randint(0,65)
                 phoneme[...,indice] = 1
             
             # select left or right depending on index even or not
