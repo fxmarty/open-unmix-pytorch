@@ -2,7 +2,6 @@ import os
 import numpy as np
 import torch
 
-<<<<<<< HEAD
 # phoneme [nb_phoneme_frames, nb_phonemes]
 # return [nb_phoneme_frames,nb_phonemes-1], with blank token removed and put in the other places
 # we assume that 0 is NOT the max in the first frame
@@ -20,9 +19,6 @@ def moveBlankTokenIntoMatrix(phoneme):
             current_ind_max = ind_max
     return output
 
-
-=======
->>>>>>> 48c5b9c843525a1076251baa9f22ea1896458596
 if __name__ == '__main__':
     exp_name = '10-16_grouped_trueVocals'
     path = '/tsi/doctorants/fmarty/Posteriograms/MUSDB18_trueVocals_posteriogram'
@@ -106,13 +102,8 @@ if __name__ == '__main__':
     dict_phoneme['special token 2'] = 'special'
     dict_phoneme['special token 3'] = 'special'
 
-<<<<<<< HEAD
     uniqueValues = list(set(dict_phoneme.values()))
     
-=======
-    uniqueValues = set(dict_phoneme.values())
-
->>>>>>> 48c5b9c843525a1076251baa9f22ea1896458596
     for index,file in enumerate(files):
         print(index)
         if file.endswith('.npy'):
@@ -120,17 +111,10 @@ if __name__ == '__main__':
             
             nb_time_frames, nb_phonemes = raw_posteriogram.shape
             
-<<<<<<< HEAD
             output = np.zeros((nb_time_frames,len(uniqueValues)))
             
             for k,class_name in enumerate(uniqueValues):
                 class_phonemes_indexes = [i for i, x in enumerate(list(dict_phoneme.values())) if x == class_name]
-=======
-            output = np.zeros(nb_time_frames,len(uniqueValues))
-            
-            for k,class_name in enumerate(uniqueValues):
-                class_phonemes_indexes = [i for i, x in enumerate(list(dict_phoneme.values()) if x == class_name]
->>>>>>> 48c5b9c843525a1076251baa9f22ea1896458596
                 output[:,k] = np.sum(raw_posteriogram[:,class_phonemes_indexes],axis=1)
 
             file_name = file.replace('_vocals', '')
