@@ -73,7 +73,8 @@ def separate(
     targets,
     model_name='umxhq',
     niter=1, softmask=False, alpha=1.0,
-    residual_model=False, device='cpu'
+    residual_model=False, device='cpu',
+    enforce_fake=False
 ):
     """
     Performing the separation on audio input
@@ -153,19 +154,20 @@ def separate(
             if nb_channels_model == 1: 
                 mixture = mixture.view(2,1,-1) # [2,1,nb_time_points]
             
-            if args['args']['fake'] == True:
+            if args['args']['fake'] == True or enforce_fake:
                 phoneme = torch.zeros(phoneme.shape).to(device)
                 phoneme[...,10] = 1
+                print("Beware that fake phoneme has been used.")
             
-            # add padding to the mixture to have a complete window for the last frame
-            if modelname in ('open-unmix'):
-                mixture, padding = utils.pad_for_stft(mixture,args['args']['nhop'])
+            # add padding to the mixture to have a complete window
+            # for the last frame
+            mixture, padding = utils.pad_for_stft(mixture,
+                                                args['args']['nhop'])
             
             Vj = unmix_target(mixture,phoneme).cpu().detach().numpy()
             
             # Revert to channel dimension if mono model
             if nb_channels_model == 1: 
-                if modelname in ('open-unmix'):
                     Vj = Vj.reshape(Vj.shape[0],1,2,-1)
                     # out [nb_frames, 1, 2, nb_bins]
 
@@ -175,14 +177,14 @@ def separate(
                 # only exponentiate the model if we use softmask
                 Vj = Vj**alpha
     
-            if modelname in ('open-unmix'):
-                V.append(Vj[:, 0, ...])  # remove sample dim
+            V.append(Vj[:, 0, ...])  # remove sample dim
         
         estimates = {}
         
         if modelname in ('open-unmix'):
             V = np.transpose(np.array(V), (1, 3, 2, 0))
-            #V mask of shape (nb_frames, nb_bins, 2,nb_targets), real values
+            #V mask of shape (nb_frames, nb_bins, 2,nb_targets),
+            # real values
             
             X = unmix_target.stft(mixture).detach().cpu().numpy()
             
@@ -191,27 +193,26 @@ def separate(
             X = X[0].transpose(2, 1, 0)
             # X shape (nb_frames, nb_bins, 2). Complex numbers
         
-        if modelname == 'open-unmix': # with wiener filtering
-            if residual_model or len(targets) == 1:
-                V = norbert.residual_model(V, X, alpha if softmask else 1)
-                source_names += (['residual'] if len(targets) > 1
-                                else ['accompaniment'])
+        if residual_model or len(targets) == 1:
+            V = norbert.residual_model(V, X, alpha if softmask else 1)
+            source_names += (['residual'] if len(targets) > 1
+                            else ['accompaniment'])
+        
+        Y = norbert.wiener(V, X.astype(np.complex64), niter,
+                        use_softmask=softmask)
+        # Y shape (nb_frames, nb_bins, 2, nb_targets), complex
+        
+        for j, name in enumerate(source_names):
+            audio_hat = istft(
+                Y[..., j].T,
+                n_fft=unmix_target.stft.n_fft,
+                n_hopsize=unmix_target.stft.n_hop
+            ) # shape [nb_channels, nb_time_frames]
             
-            Y = norbert.wiener(V, X.astype(np.complex64), niter,
-                            use_softmask=softmask)
-            # Y shape (nb_frames, nb_bins, 2, nb_targets), complex
+            if padding > 0: # remove padding added for complete stft
+                audio_hat = audio_hat[...,:-padding] 
             
-            for j, name in enumerate(source_names):
-                audio_hat = istft(
-                    Y[..., j].T,
-                    n_fft=unmix_target.stft.n_fft,
-                    n_hopsize=unmix_target.stft.n_hop
-                ) # shape [nb_channels, nb_time_frames]
-                
-                if padding > 0: # remove padding added for complete stft
-                    audio_hat = audio_hat[...,:-padding] 
-                
-                estimates[name] = audio_hat.T
+            estimates[name] = audio_hat.T
     
     return estimates
 
@@ -265,7 +266,8 @@ def test_main(
     input_files=None, phoneme_path=None, samplerate=16000,
     niter=1, alpha=1.0, softmask=False, residual_model=False,
     model='umxhq', targets=('vocals', 'drums', 'bass', 'other'),
-    outdir=None, start=0.0, duration=-1.0, no_cuda=False):
+    outdir=None, start=0.0, duration=-1.0, no_cuda=False,
+    enforce_fake=False):
 
     use_cuda = not no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -315,7 +317,8 @@ def test_main(
             alpha=alpha,
             softmask=softmask,
             residual_model=residual_model,
-            device=device
+            device=device,
+            enforce_fake=False
         ) # is a dictionary
 
         # Set in which folder the results should be put
@@ -406,12 +409,16 @@ if __name__ == '__main__':
         help='disables CUDA inference'
     )
     
+    parser.add_argument('--enforce-fake',
+                        action='store_true',
+                        help='Input fake phoneme no matter the model')
+    
     args, _ = parser.parse_known_args()
     args = inference_args(parser, args)
     
     test_main(
         input_files=args.input, phoneme_path=args.phoneme,
         alpha=args.alpha, softmask=args.softmask,
-        niter=args.niter, residual_model=args.residual_model, model=args.model,
-        targets=args.targets, outdir=args.outdir, start=args.start,
-        duration=args.duration, no_cuda=args.no_cuda)
+        niter=args.niter, residual_model=args.residual_model, model=args.model, targets=args.targets, outdir=args.outdir,
+        start=args.start, duration=args.duration, no_cuda=args.no_cuda,
+        enforce_fake=args.enforce_fake)

@@ -151,7 +151,7 @@ if __name__ == "__main__":
         '--root','-r',
         type=str,
         action='append',
-        help='Path to the directory with .json files (e.g. test directory)',
+        help='Path to the directory with .json files, e.g. expName/evalDir_sub',
         #required=True
     )
     
@@ -167,6 +167,9 @@ if __name__ == "__main__":
     
     rootdirs = args.root
     exp_names = args.name
+    
+    for i,experiment_path in enumerate(rootdirs):
+        rootdirs[i] = '/tsi/doctorants/fmarty/executedJobs/'+experiment_path
     
     #rootdirs = ['/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub','/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub_bis','/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub']
     

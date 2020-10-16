@@ -46,7 +46,8 @@ def evalTargets(joint,args,device):
             niter=args.niter,
             alpha=args.alpha,
             softmask=args.softmask,
-            device=device
+            device=device,
+            enforce_fake=args.enforce_fake
         )
         
         if args.outdir:
@@ -187,6 +188,11 @@ if __name__ == '__main__':
         action='store_true', default=False,
         help='flags wav version of the dataset'
     )
+    
+    parser.add_argument('--enforce-fake',
+                        action='store_true',
+                        help='Input fake phoneme no matter the model')
+    
         
     args, _ = parser.parse_known_args()
     args = test.inference_args(parser, args)
