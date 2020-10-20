@@ -303,6 +303,8 @@ def main():
             "*",train_dataset.samples_per_track,", number of tracks * samples per track)")
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
     
+    number_of_phonemes = train_dataset[0][1].shape[1]
+    
     # called at every epoch, where initial_seed is different at every epoch and for
     # every worker.
     def _init_fn(worker_id):
@@ -338,7 +340,8 @@ def main():
             hidden_size=args.hidden_size,
             n_fft=args.nfft,
             n_hop=args.nhop,
-            sample_rate=train_dataset.sample_rate
+            sample_rate=train_dataset.sample_rate,
+            number_of_phonemes=number_of_phonemes
         ).to(device)
 
     optimizer = torch.optim.Adam(

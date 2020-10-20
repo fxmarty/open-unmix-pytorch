@@ -5,22 +5,28 @@ import torch
 # phoneme [nb_phoneme_frames, nb_phonemes]
 # return [nb_phoneme_frames,nb_phonemes-1], with blank token removed and put in the other places
 # we assume that 0 is NOT the max in the first frame
-def moveBlankTokenIntoMatrix(phoneme):
+def moveBlankTokenIntoMatrix(phoneme,special_index,ctc_index):
     nb_phoneme_frames, nb_phonemes = phoneme.shape
-    output = np.copy(phoneme)[:,:-1]
-    current_ind_max = np.argmax(phoneme,axis=1)
+    output = np.copy(phoneme)
+    output = np.delete(output,ctc_index,axis=1) # remove special token index
+    
+    current_ind_max = np.argmax(phoneme[0])
+    if current_ind_max == ctc_index:
+        current_ind_max = special_index
+    
     for i in range(nb_phoneme_frames):
         ind_max = np.argmax(phoneme[i]) 
-
-        if ind_max == 64:
-            output[i][current_ind_max] += phoneme[i][64]
+        
+        if ind_max == ctc_index:
+            output[i][current_ind_max] += phoneme[i][ctc_index]
         else:
             output[i] = output[i]/output[i].sum()
             current_ind_max = ind_max
+
     return output
 
 if __name__ == '__main__':
-    exp_name = '10-16_grouped_trueVocals'
+    exp_name = '10-19_grouped_trueVocals_ctc_moved'
     path = '/tsi/doctorants/fmarty/Posteriograms/MUSDB18_trueVocals_posteriogram'
     files = sorted(os.listdir(path))
     outPath = '/tsi/doctorants/fmarty/Posteriograms/' + exp_name
@@ -100,9 +106,17 @@ if __name__ == '__main__':
     dict_phoneme['m'] = 'nasal'
     dict_phoneme['special token 1'] = 'special'
     dict_phoneme['special token 2'] = 'special'
-    dict_phoneme['special token 3'] = 'special'
+    dict_phoneme['special token 3'] = 'ctc_token'
 
-    uniqueValues = list(set(dict_phoneme.values()))
+    uniqueValues = sorted(list(set(dict_phoneme.values())))
+    
+    # make sure that special is at the end
+    uniqueValues.append(uniqueValues.pop(uniqueValues.index('special')))
+    # make sure that ctc_token is at the end
+    uniqueValues.append(uniqueValues.pop(uniqueValues.index('ctc_token'))) 
+    
+    ctc_index = uniqueValues.index('ctc_token')
+    special_index = uniqueValues.index('special')
     
     for index,file in enumerate(files):
         print(index)
@@ -113,11 +127,19 @@ if __name__ == '__main__':
             
             output = np.zeros((nb_time_frames,len(uniqueValues)))
             
+            #print(uniqueValues)
             for k,class_name in enumerate(uniqueValues):
-                class_phonemes_indexes = [i for i, x in enumerate(list(dict_phoneme.values())) if x == class_name]
+                
+                class_phonemes_indexes = [i for i, x
+                                        in enumerate(list(dict_phoneme.values()))
+                                        if x == class_name]
+                #print(class_phonemes_indexes,class_name)
                 output[:,k] = np.sum(raw_posteriogram[:,class_phonemes_indexes],axis=1)
+            
+            output = moveBlankTokenIntoMatrix(output,special_index,ctc_index)
 
             file_name = file.replace('_vocals', '')
             file_name = file_name.replace('_posteriorgram','')
             file_name = file_name.replace('.npy','.pt')
             torch.save(torch.from_numpy(output),outPath+'/'+file_name)
+            

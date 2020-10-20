@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_model_summary
 from torchsummary import summary
+import matplotlib.pyplot as plt
 
 import os,sys,inspect
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -74,7 +75,7 @@ class OpenUnmix(nn.Module):
         normalization_style="overall",
         input_is_spectrogram=False,
         hidden_size=512,
-        phoneme_hidden_size=8, # hyperparameter
+        phoneme_hidden_size=16, # hyperparameter
         nb_channels=2,
         sample_rate=16000,
         nb_layers=3,
@@ -191,9 +192,29 @@ class OpenUnmix(nn.Module):
         x = x.reshape(nb_frames, nb_samples, self.hidden_size)
         # squash range to [-1, 1]
         x = torch.tanh(x)
-
+        
+        """
+        length = 1000
+        begin = 4000
+        plt.imshow(phoneme[0,begin:begin+length].detach().cpu().numpy(),
+                    aspect=0.1,interpolation='none')
+        plt.colorbar()
+        plt.savefig('phoneme_input'+'.png',dpi=1200,bbox_inches='tight')
+        plt.close("all")
+        plt.clf()
+        """
+        
         # out [nb_frames,nb_samples,phoneme_hidden_size]
         phoneme = self.phoneme_network(phoneme,nb_frames,offset=offset)
+        
+        """
+        plt.imshow(phoneme[begin:begin+length,0].detach().cpu().numpy(),
+                    aspect=0.05,interpolation='none')
+        plt.colorbar()
+        plt.savefig('phoneme_distribution'+'.png',dpi=1200,bbox_inches='tight')
+        plt.close("all")
+        plt.clf()
+        """
         
         # out [nb_frames, nb_samples,hidden_size+phoneme_hidden_size]
         x = torch.cat([x,phoneme],dim=-1)
