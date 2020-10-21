@@ -207,7 +207,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         
         for track in self.mus.tracks:
             phoneme = torch.load(self.root_phoneme+'/'
-                            +'train'+'_'+track.name+'.pt')
+                            +'train'+'_'+track.name+'.pt').float()
             self.phonemes_dict[track.name] = phoneme
         
     def __getitem__(self, index):

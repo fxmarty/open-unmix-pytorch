@@ -17,7 +17,7 @@ import tqdm
 from contextlib import redirect_stderr
 import io
 
-def load_model(target, model_name='umxhq', device='cpu'):
+def load_model(target,number_of_phonemes, model_name='umxhq', device='cpu'):
     """
     target model path can be either <target>.pth, or <target>-sha256.pth
     (as used on torchub)
@@ -44,7 +44,8 @@ def load_model(target, model_name='umxhq', device='cpu'):
                 n_fft=results['args']['nfft'],
                 n_hop=results['args']['nhop'],
                 nb_channels=results['args']['nb_channels'],
-                hidden_size=results['args']['hidden_size']
+                hidden_size=results['args']['hidden_size'],
+                number_of_phonemes=number_of_phonemes
             )
             unmix.stft.center = True
             unmix.phoneme_network.center = True
@@ -131,10 +132,12 @@ def separate(
         
         # this is because 'center=True' option from STFT adds n_fft/2 padding
         # at the beginning and end, correspondig to one phoneme frame
-        phoneme = torch.cat([torch.zeros(1,65),phoneme,torch.zeros(1,65)],dim=0)
+        number_of_phonemes = phoneme.shape[1]
+        phoneme = torch.cat([torch.zeros(1,number_of_phonemes),
+                            phoneme,torch.zeros(1,number_of_phonemes)],dim=0)
         
         # add batch dimension
-        phoneme = phoneme[None,...].to(device)
+        phoneme = phoneme[None,...].float().to(device)
         
         source_names = []
         V = []
@@ -143,7 +146,8 @@ def separate(
             unmix_target,args = load_model(
                 target=target,
                 model_name=model_name,
-                device=device
+                device=device,
+                number_of_phonemes=number_of_phonemes
             )
             
             modelname = args['args']['modelname']
@@ -156,7 +160,7 @@ def separate(
             
             if args['args']['fake'] == True or enforce_fake:
                 phoneme = torch.zeros(phoneme.shape).to(device)
-                phoneme[...,10] = 1
+                phoneme[...,3] = 1
                 print("Beware that fake phoneme has been used.")
             
             # add padding to the mixture to have a complete window

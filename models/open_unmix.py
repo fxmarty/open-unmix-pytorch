@@ -26,13 +26,16 @@ class PhonemeNetwork(nn.Module):
     ):
         super(PhonemeNetwork, self).__init__()
         
+        """
         self.fc1Phoneme = nn.Sequential(
                             Linear(number_of_phonemes, phoneme_hidden_size),
                             nn.ReLU()
                             )
+        """
         
         self.lstmPhoneme = LSTM(
-            input_size=phoneme_hidden_size,
+            #input_size=phoneme_hidden_size,
+            input_size=number_of_phonemes,
             hidden_size=phoneme_hidden_size//2,
             num_layers=2,
             bidirectional=True,
@@ -56,7 +59,7 @@ class PhonemeNetwork(nn.Module):
         nb_samples, nb_frames,nb_phonemes = phoneme.shape
         
         # out [nb_samples, nb_frames, phoneme_hidden_size]
-        phoneme = self.fc1Phoneme(phoneme)
+        #phoneme = self.fc1Phoneme(phoneme)
             
         # out [nb_samples, nb_frames, phoneme_hidden_size]
         phoneme = self.lstmPhoneme(phoneme)[0]
