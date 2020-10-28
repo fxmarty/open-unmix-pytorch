@@ -86,7 +86,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     
-    target, sample_rate = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/test/AM Contra - Heart Peripheral/mixture.wav')
+    target, sample_rate = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/test/AM Contra - Heart Peripheral/vocals.wav')
     estimate,sample_rate = torchaudio.load('/tsi/doctorants/fmarty/executedJobs/09-14_CTNbaselineJoint/outDir/test/AM Contra - Heart Peripheral/vocals.wav')    
 
     target = np.array(target)[:,10*16000:40*16000]
@@ -125,9 +125,9 @@ if __name__ == '__main__':
                         win=sr, hop=sr)[0]
     sdr_4_museval = museval.evaluate(target,estimate_4,win=sr, hop=sr)[0]
     
-    print("SDR museval estimate*1:",np.median(sdr_1_museval))
-    print("SDR museval estimate*0.5:",np.median(sdr_0_5_museval))
-    print("SDR museval estimate*4:",np.median(sdr_4_museval))
+    print("SDR museval.evaluate (estimate*1):",np.median(sdr_1_museval))
+    print("SDR museval.evaluate (estimate*0.5):",np.median(sdr_0_5_museval))
+    print("SDR museval.evaluate (estimate*4):",np.median(sdr_4_museval))
     print("----")
     
     sdr_1_museval_v3 = museval.evaluate(target,estimate_1,
@@ -137,9 +137,9 @@ if __name__ == '__main__':
     sdr_4_museval_v3 = museval.evaluate(target,estimate_4,
                         win=sr, hop=sr,mode='v3')[0]
     
-    print("SDR museval v3 estimate*1:",np.median(sdr_1_museval_v3))
-    print("SDR museval v3 estimate*0.5:",np.median(sdr_0_5_museval_v3))
-    print("SDR museval v3 estimate*4:",np.median(sdr_4_museval_v3))
+    print("SDR museval.evaluate v3 (estimate*1):",np.median(sdr_1_museval_v3))
+    print("SDR museval.evaluate v3 (estimate*0.5):",np.median(sdr_0_5_museval_v3))
+    print("SDR museval.evaluate v3 (estimate*4):",np.median(sdr_4_museval_v3))
     print("----")
 
     sdr_1_mir = mir_eval.separation.bss_eval_images_framewise(
@@ -152,9 +152,9 @@ if __name__ == '__main__':
     sdr_4_mir = mir_eval.separation.bss_eval_images_framewise(
                                 target, estimate_4, window=sr, hop=sr)[0]
 
-    print("SDR estimate*1 mir_eval_image:",np.median(sdr_1_mir))
-    print("SDR estimate*0.5 mir_eval_image:",np.median(sdr_0_5_mir))
-    print("SDR estimate*4 mir_eval_image:",np.median(sdr_4_mir))
+    print("SDR mir_eval_image (estimate*1):",np.median(sdr_1_mir))
+    print("SDR mir_eval_image (estimate*0.5):",np.median(sdr_0_5_mir))
+    print("SDR mir_eval_image (estimate*4):",np.median(sdr_4_mir))
     print("----")
     
     sdr_1_mir = mir_eval.separation.bss_eval_sources_framewise(
@@ -167,9 +167,9 @@ if __name__ == '__main__':
     sdr_4_mir = mir_eval.separation.bss_eval_sources_framewise(
                                 target, estimate_4, window=sr, hop=sr)[0]
     
-    print("SDR estimate*1 mir_eval_source:",np.median(sdr_1_mir))
-    print("SDR estimate*0.5 mir_eval_source:",np.median(sdr_0_5_mir))
-    print("SDR estimate*4 mir_eval_source:",np.median(sdr_4_mir))
+    print("SDR mir_eval_source (estimate*1):",np.median(sdr_1_mir))
+    print("SDR mir_eval_source (estimate*0.5):",np.median(sdr_0_5_mir))
+    print("SDR mir_eval_source (estimate*4):",np.median(sdr_4_mir))
     print("----")
     
     torch_estimate_1 = torch.from_numpy(estimate_1)
@@ -186,10 +186,10 @@ if __name__ == '__main__':
                         sr,scale_invariant=False,eps=0),eps=0)
     sdr_ideal_mine = -metric_SI_SDR(ideal_SDR_framewise(torch_estimate_1, torch_target, sr),eps=0)
     
-    print("SDR estimate*1 mine:",sdr_1_mine)
-    print("SDR estimate*0.5 mine:",sdr_0_5_mine)
-    print("SDR estimate*4 mine:",sdr_4_mine)
-    print("SDR ideal mine:",sdr_ideal_mine)
+    print("SDR mine (estimate*1):",sdr_1_mine)
+    print("SDR mine (estimate*0.5):",sdr_0_5_mine)
+    print("SDR mine (estimate*4):",sdr_4_mine)
+    print("SDR mine (ideal multiplication factor):",sdr_ideal_mine)
     print("----")
     
     si_sdr_1_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_1, torch_target,
@@ -199,17 +199,17 @@ if __name__ == '__main__':
     si_sdr_4_mine = -metric_SI_SDR(sisdr_framewise(torch_estimate_4, torch_target,
                         sr,scale_invariant=True,eps=0),eps=0)
 
-    print("SDR estimate*1 mine:",si_sdr_1_mine)
-    print("SDR estimate*0.5 mine:",si_sdr_0_5_mine)
-    print("SDR estimate*4 mine:",si_sdr_4_mine)
+    print("SI-SDR mine (estimate*1):",si_sdr_1_mine)
+    print("SI-SDR mine (estimate*0.5):",si_sdr_0_5_mine)
+    print("SI-SDR mine (estimate*4):",si_sdr_4_mine)
     
     
     
     target_44100, sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18wav/train/Music Delta - Britpop/vocals.wav')
     mixture_44100,sample_rate_1 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18wav/train/Music Delta - Britpop/mixture.wav')
     
-    target_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/train/Music Delta - Britpop/mixture.wav')
-    mixture_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/train/Music Delta - Britpop/vocals.wav')
+    target_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/train/Music Delta - Britpop/vocals.wav')
+    mixture_16000,sample_rate_2 = torchaudio.load('/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/train/Music Delta - Britpop/mixture.wav')
     
     si_sdr_44100_mine = -metric_SI_SDR(sisdr_framewise(mixture_44100, target_44100,
                         sample_rate_1,scale_invariant=True,eps=0),eps=0)
@@ -217,6 +217,6 @@ if __name__ == '__main__':
     si_sdr_16000_mine = -metric_SI_SDR(sisdr_framewise(mixture_16000, target_16000,
                         sample_rate_2,scale_invariant=True,eps=0),eps=0)
     
-    print("---")
+    print("--- An other song at different sampling rate, what is the influence? ---")
     print("SI-SDR at 44100 Hz:",si_sdr_44100_mine)
     print("SI-SDR at 16000 Hz:",si_sdr_16000_mine)
