@@ -71,8 +71,6 @@ def resize_graph(dot, size_per_element=0.15, min_size=12):
     size_str = str(size) + "," + str(size)
     dot.graph_attr.update(size=size_str)
 
-
-
 def plot_grad_flow(named_parameters,i):
     ave_grads = []
     layers = []
@@ -131,7 +129,7 @@ if __name__ == '__main__':
     phoneme = phoneme[:nb_phoneme_frames]
     
     # this is because 'center=True' option from STFT adds n_fft/2 padding
-    # at the beginning and end, correspondig to one phoneme frame
+    # at the beginning and end, corresponding to one phoneme frame
     phoneme = torch.cat([torch.zeros(1,65),phoneme,torch.zeros(1,65)],dim=0)
     
     # add padding to the mixture to have a complete window
