@@ -1,6 +1,7 @@
 import argparse
 
 from models import open_unmix
+from models import open_unmix_autoencoder
 
 import data
 import utils
@@ -58,7 +59,7 @@ class SummaryWriter(SummaryWriter):
 batch_seen = 0
 
 #@torchsnooper.snoop()
-def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch_num,tb="no"):
+def train(args, unmix, device, train_sampler, optimizer,tb="no"):
     losses = utils.AverageMeter()
     unmix.train()
     pbar = tqdm.tqdm(train_sampler, disable=args.quiet)
@@ -72,13 +73,13 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
         
         sys.stdout.write("\rBatch number %i" % i)
         sys.stdout.flush()
-        if model_name_general in ('open-unmix'):
-            Y_hat = unmix(x,phoneme)
-            Y = unmix.transform(y)
+        
+        Y_hat = unmix(x,phoneme)
+        Y = unmix.transform(y)
 
-            loss = torch.nn.functional.mse_loss(Y_hat, Y)
-            
-            losses.update(loss.item(), Y.size(1))
+        loss = torch.nn.functional.mse_loss(Y_hat, Y)
+        
+        losses.update(loss.item(), Y.size(1))
         
         i = i + 1
 
@@ -94,20 +95,20 @@ def train(args, unmix, device, train_sampler, optimizer,model_name_general,epoch
     return losses.avg
 
 
-def valid(args, unmix, device, valid_sampler,model_name_general,tb="no"):
+def valid(args, unmix, device, valid_sampler,tb="no"):
     losses = utils.AverageMeter()
     unmix.eval()
     global batch_seen
     with torch.no_grad():
         for x, phoneme, y in valid_sampler:
             x, phoneme, y = x.to(device), phoneme.to(device), y.to(device)
-            if model_name_general in ('open-unmix'):
-                Y_hat = unmix(x,phoneme)
-                Y = unmix.transform(y)
-                
-                loss = torch.nn.functional.mse_loss(Y_hat, Y)
-                
-                losses.update(loss.item(), Y.size(1))
+            
+            Y_hat = unmix(x,phoneme)
+            Y = unmix.transform(y)
+            
+            loss = torch.nn.functional.mse_loss(Y_hat, Y)
+            
+            losses.update(loss.item(), Y.size(1))
             
             del Y_hat
             del x
@@ -154,13 +155,15 @@ def main():
     parser.add_argument('--target', type=str, default='vocals',
                         help='target source (will be passed to the dataset)')
     
-    parser.add_argument('--root', type=str, help='root path of dataset')
+    parser.add_argument('--root', required=True,
+                        type=str, help='root path of dataset')
     
     # BEWARE: at the STFT time resolution
-    parser.add_argument('--root-phoneme', type=str, help='root path of .pt phonemes')
+    parser.add_argument('--root-phoneme', type=str, required=True,
+                        help='root path of .pt phonemes')
     
     parser.add_argument('--output', type=str, default="open-unmix",
-                        help='provide output path base folder name')
+                        required=True, help='provide output path base folder name')
     
     parser.add_argument('--model', type=str, help='Path to checkpoint folder')
 
@@ -220,7 +223,7 @@ def main():
     
     parser.add_argument(
         '--modelname',
-        choices=['open-unmix'],
+        choices=['open-unmix','open-unmix-encoder'],
         type=str,
         help='model name, used to modify the training procedure accordingly'
     )
@@ -255,10 +258,16 @@ def main():
                         action='store_false',
                         help='Disable random channel selection for each target in the dataset')
     
+    parser.add_argument('--encoder', default=None,
+                        help='Encoder path, if used')
+    
+    parser.add_argument('--bottleneck-size', type=int, default=None,
+                        help='Set the bottleneck size in case the encoder is used')
+    
     args, _ = parser.parse_known_args()
     
     # Make normalization-style argument not mendatory
-    if args.normalization_style == None and args.modelname == 'open-unmix':
+    if args.normalization_style == None:
         parser.set_defaults(normalization_style='overall')
         
     # Update args according to the conditions above
@@ -331,7 +340,7 @@ def main():
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
         #scaler_mean, scaler_std = None,None
         
-    if args.modelname == 'open-unmix':
+    if args.modelname == 'open-unmix' and args.encoder == None:
         unmix = open_unmix.OpenUnmix(
             normalization_style=args.normalization_style,
             input_mean=scaler_mean,
@@ -343,6 +352,25 @@ def main():
             sample_rate=train_dataset.sample_rate,
             number_of_phonemes=number_of_phonemes
         ).to(device)
+        
+    elif args.modelname == 'open-unmix-encoder' and args.encoder != None:
+        unmix = open_unmix_autoencoder.OpenUnmix(
+            normalization_style=args.normalization_style,
+            input_mean=scaler_mean,
+            input_scale=scaler_std,
+            nb_channels=args.nb_channels,
+            hidden_size=args.hidden_size,
+            n_fft=args.nfft,
+            n_hop=args.nhop,
+            sample_rate=train_dataset.sample_rate,
+            number_of_phonemes=number_of_phonemes,
+            bottleneck_size=args.bottleneck_size
+        ).to(device)
+        unmix.phoneme_encoder.load_state_dict(torch.load(args.encoder))
+        
+        # do not train the encoder here
+        for param in unmix.phoneme_encoder.parameters():
+            param.requires_grad = False
 
     optimizer = torch.optim.Adam(
         unmix.parameters(),
@@ -424,8 +452,8 @@ def main():
         for param_group in optimizer.param_groups:
             print("Learning rate:", param_group['lr'])
 
-        train_loss = train(args, unmix, device, train_sampler, optimizer,model_name_general=args.modelname,epoch_num=epoch,tb=args.tb)
-        valid_loss = valid(args, unmix, device, valid_sampler,model_name_general=args.modelname,tb=args.tb)
+        train_loss = train(args, unmix, device, train_sampler, optimizer,tb=args.tb)
+        valid_loss = valid(args, unmix, device, valid_sampler,tb=args.tb)
 
         scheduler.step(valid_loss)
         train_losses.append(train_loss)

@@ -9,83 +9,18 @@ import matplotlib.pyplot as plt
 import os,sys,inspect
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
-sys.path.insert(0,parentdir) 
+sys.path.insert(0,parentdir)
+sys.path.insert(0,os.path.join(parentdir,'phoneme-autoencoder'))
 
 import time_transform_posteriograms
 import normalization
 import tf_transforms
 
-class PhonemeNetwork(nn.Module):
-    def __init__(
-        self,
-        phoneme_hidden_size,
-        number_of_phonemes,
-        fft_window_duration,
-        fft_hop_duration,
-        center
-    ):
-        super(PhonemeNetwork, self).__init__()
-        
-        
-        self.fc1Phoneme = nn.Sequential(
-                            Linear(number_of_phonemes, 40),
-                            nn.ReLU()
-                            )
-        
-        self.fc2Phoneme = nn.Sequential(
-                            Linear(40, 20),
-                            nn.ReLU(),
-                            nn.Dropout(0.5)
-                            )
-        
-        self.fc3Phoneme = nn.Sequential(
-                            Linear(20, phoneme_hidden_size),
-                            nn.ReLU()
-                            )
-        
-        
-        self.lstmPhoneme = LSTM(
-            input_size=phoneme_hidden_size,
-            #input_size=number_of_phonemes,
-            hidden_size=phoneme_hidden_size//2,
-            num_layers=2,
-            bidirectional=True,
-            batch_first=True,
-            dropout=0.3
-        )
-        
-        self.fft_window_duration = fft_window_duration
-        self.fft_hop_duration = fft_hop_duration
-        self.center = center
-    
-    def forward(self, phoneme,nb_frames,offset):
-        """
-        #out [nb_samples, nb_frames, nb_phonemes]
-        phoneme = time_transform_posteriograms.open_unmix(
-                            phoneme,nb_frames,0.016,
-                            self.fft_window_duration,self.fft_hop_duration,
-                            center=self.center,offset=offset)
-        """
-        
-        nb_samples, nb_frames,nb_phonemes = phoneme.shape
-        
-        # out [nb_samples, nb_frames, 40]
-        phoneme = self.fc1Phoneme(phoneme)
-        
-        # out [nb_samples, nb_frames, 20]
-        phoneme = self.fc2Phoneme(phoneme)
-        
-        # out [nb_samples, nb_frames, phoneme_hidden_size]
-        phoneme = self.fc3Phoneme(phoneme)
-            
-        # out [nb_samples, nb_frames, phoneme_hidden_size]
-        phoneme = self.lstmPhoneme(phoneme)[0]
-        
-        # to adapt to open-unmix, reshape to
-        # [nb_frames,nb_samples,phoneme_hidden_size]
-        phoneme = phoneme.reshape(nb_frames,nb_samples,-1)
-        
-        return phoneme
+from model import Encoder
+
+sys.path.remove(parentdir)
+sys.path.remove(os.path.join(parentdir,'phoneme-autoencoder'))
+
 
 class OpenUnmix(nn.Module):
     def __init__(
@@ -95,7 +30,6 @@ class OpenUnmix(nn.Module):
         normalization_style="overall",
         input_is_spectrogram=False,
         hidden_size=512,
-        phoneme_hidden_size=16, # hyperparameter
         nb_channels=2,
         sample_rate=16000,
         nb_layers=3,
@@ -104,7 +38,8 @@ class OpenUnmix(nn.Module):
         max_bin=None,
         unidirectional=False,
         power=1,
-        number_of_phonemes = 65
+        number_of_phonemes = 65,
+        bottleneck_size=8
     ):
         """
         Input:
@@ -146,12 +81,12 @@ class OpenUnmix(nn.Module):
         self.bn1 = BatchNorm1d(hidden_size)
         
         if unidirectional:
-            lstm_hidden_size = hidden_size+phoneme_hidden_size
+            lstm_hidden_size = hidden_size+bottleneck_size
         else:
-            lstm_hidden_size = (hidden_size+phoneme_hidden_size) // 2
+            lstm_hidden_size = (hidden_size+bottleneck_size) // 2
         
         self.lstm = LSTM(
-            input_size=hidden_size+phoneme_hidden_size,
+            input_size=hidden_size+bottleneck_size,
             hidden_size=lstm_hidden_size,
             num_layers=nb_layers,
             bidirectional=not unidirectional,
@@ -160,7 +95,7 @@ class OpenUnmix(nn.Module):
         )
         
         self.fc2 = Linear(
-            in_features=(hidden_size+phoneme_hidden_size)*2,
+            in_features=(hidden_size+bottleneck_size)*2,
             out_features=hidden_size,
             bias=False
         )
@@ -183,15 +118,11 @@ class OpenUnmix(nn.Module):
         )
         
 
-        self.phoneme_network = PhonemeNetwork(
-                                    phoneme_hidden_size=phoneme_hidden_size,
-                                    number_of_phonemes=number_of_phonemes,
-                                    fft_window_duration=n_fft/self.sp_rate,
-                                    fft_hop_duration=n_hop/self.sp_rate,
-                                    center=False
-                                )
+        self.phoneme_encoder = Encoder(number_of_phonemes=number_of_phonemes,
+                                       bottleneck_size=bottleneck_size
+                                    )
     
-    def forward(self, x, phoneme,offset=0):
+    def forward(self, x, phoneme):
         # check for waveform or spectrogram
         # transform to spectrogram if (nb_samples, nb_channels, nb_timesteps)
         # and reduce feature dimensions, therefore we reshape
@@ -223,9 +154,8 @@ class OpenUnmix(nn.Module):
         plt.close("all")
         plt.clf()
         """
-        
-        # out [nb_frames,nb_samples,phoneme_hidden_size]
-        phoneme = self.phoneme_network(phoneme,nb_frames,offset=offset)
+        # out [nb_samples,nb_frames,bottleneck_size]
+        phoneme = self.phoneme_encoder(phoneme)
         
         """
         plt.imshow(phoneme[begin:begin+length,0].detach().cpu().numpy(),
@@ -235,8 +165,10 @@ class OpenUnmix(nn.Module):
         plt.close("all")
         plt.clf()
         """
-        
-        # out [nb_frames, nb_samples,hidden_size+phoneme_hidden_size]
+        # out [nb_frames,nb_samples,bottleneck_size]
+        phoneme = torch.transpose(phoneme,0,1)
+
+        # out [nb_frames, nb_samples,hidden_size+bottleneck_size]
         x = torch.cat([x,phoneme],dim=-1)
 
         # apply 3-layers of stacked LSTM
@@ -246,7 +178,7 @@ class OpenUnmix(nn.Module):
         x = torch.cat([x, lstm_out[0]], -1)
 
         # first dense stage + batch norm
-        #input to fc2 [nb_frames*nb_samples, 2*(hidden_size+phoneme_hidden_size)]
+        #input to fc2 [nb_frames*nb_samples, 2*(hidden_size+bottleneck_size)]
         x = self.fc2(x.reshape(-1, x.shape[-1]))
         x = self.bn2(x)
 

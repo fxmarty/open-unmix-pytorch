@@ -13,6 +13,22 @@ class Encoder(nn.Module):
     ):
         super(Encoder, self).__init__()
         
+        self.fc1 = nn.Sequential(
+                        nn.Linear(number_of_phonemes,32,bias=False),
+                        nn.ReLU()
+                )
+        
+        self.fc2 = nn.Sequential(
+                        nn.Linear(32,16,bias=False),
+                        nn.ReLU()
+                )
+        
+        self.fc3 = nn.Sequential(
+                        nn.Linear(16,bottleneck_size,bias=False),
+                        nn.ReLU(),
+                )
+        
+        """
         self.encoding_lstm = nn.LSTM(
                                     input_size=number_of_phonemes,
                                     hidden_size=bottleneck_size//2,
@@ -20,9 +36,14 @@ class Encoder(nn.Module):
                                     batch_first=True,
                                     bidirectional=True
                             )
-    
+        """
+        
     def forward(self,phoneme):
-        return self.encoding_lstm(phoneme)[0]
+        x = self.fc1(phoneme)
+        x = self.fc2(x)
+        x = self.fc3(x)
+        return x
+        #return self.encoding_lstm(phoneme)[0]
 
 class Decoder(nn.Module):
     def __init__(
@@ -33,19 +54,17 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         
         self.fc1 = nn.Sequential(
-                        nn.Linear(bottleneck_size,16),
-                        nn.ReLU(),
-                        nn.Dropout(0.5)
+                        nn.Linear(bottleneck_size,16,bias=False),
+                        nn.ReLU()
                 )
         
         self.fc2 = nn.Sequential(
-                        nn.Linear(16,32),
-                        nn.ReLU(),
-                        nn.Dropout(0.5)
+                        nn.Linear(16,32,bias=False),
+                        nn.ReLU()
                 )
-                
+        
         self.fc3 = nn.Sequential(
-                        nn.Linear(32,number_of_phonemes),
+                        nn.Linear(32,number_of_phonemes,bias=False),
                         nn.Sigmoid()
                 )
         

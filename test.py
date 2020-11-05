@@ -10,6 +10,7 @@ import resampy
 import math
 
 from models import open_unmix
+from models import open_unmix_autoencoder
 
 import utils
 import warnings
@@ -47,9 +48,19 @@ def load_model(target,number_of_phonemes, model_name='umxhq', device='cpu'):
                 hidden_size=results['args']['hidden_size'],
                 number_of_phonemes=number_of_phonemes
             )
-            unmix.stft.center = True
-            unmix.phoneme_network.center = True
-            
+        
+        elif results['args']['modelname'] == 'open-unmix-encoder':
+            unmix = open_unmix_autoencoder.OpenUnmix(
+                normalization_style=results['args']['normalization_style'],
+                n_fft=results['args']['nfft'],
+                n_hop=results['args']['nhop'],
+                nb_channels=results['args']['nb_channels'],
+                hidden_size=results['args']['hidden_size'],
+                number_of_phonemes=number_of_phonemes,
+                bottleneck_size=results['args']['bottleneck_size']
+            )
+        unmix.stft.center = True
+        unmix.phoneme_network.center = True
         unmix.load_state_dict(state) # Load saved model
         unmix.eval()
         unmix.to(device)

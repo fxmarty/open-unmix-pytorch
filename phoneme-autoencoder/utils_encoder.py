@@ -19,6 +19,12 @@ def save_checkpoint(state, is_best, path):
             state['state_dict'],
             os.path.join(path, 'model.pth')
         )
+        # save the encoder
+        torch.save(
+            state['encoder_state_dict'],
+            os.path.join(path, 'encoder.pth')
+        )
+        
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

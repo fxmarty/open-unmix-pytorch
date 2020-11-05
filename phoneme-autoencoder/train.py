@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard.summary import hparams
 
 import data
-import utils
+import utils_encoder
 import model
 
 from datetime import datetime
@@ -35,7 +35,7 @@ class SummaryWriter(SummaryWriter):
             self.add_scalar(k, v)
 
 def train(args, autoencoder, device, train_sampler, optimizer):
-    losses = utils.AverageMeter()
+    losses = utils_encoder.AverageMeter()
     autoencoder.train()
     pbar = tqdm.tqdm(train_sampler)
     i = 0
@@ -50,7 +50,7 @@ def train(args, autoencoder, device, train_sampler, optimizer):
         
         estimate = autoencoder(phoneme)
 
-        loss = torch.nn.functional.l1_loss(estimate, phoneme)
+        loss = torch.nn.functional.mse_loss(estimate, phoneme)# + phoneme
         
         # estimate.size(0) for batch size
         losses.update(loss.item(), estimate.size(0))
@@ -63,14 +63,14 @@ def train(args, autoencoder, device, train_sampler, optimizer):
     return losses.avg
 
 def valid(args, autoencoder, device, valid_sampler):
-    losses = utils.AverageMeter()
+    losses = utils_encoder.AverageMeter()
     autoencoder.eval()
     with torch.no_grad():
         for phoneme in valid_sampler:
             phoneme = phoneme.to(device)
             estimate = autoencoder(phoneme)
             
-            loss = torch.nn.functional.l1_loss(estimate, phoneme)
+            loss = torch.nn.functional.mse_loss(estimate, phoneme)
             
             losses.update(loss.item(), estimate.size(0))
         
@@ -95,11 +95,11 @@ def main():
     parser.add_argument('--lr', type=float, default=0.001,
                         help='learning rate, defaults to 1e-3')
     
-    parser.add_argument('--patience', type=int, default=140,
+    parser.add_argument('--patience', type=int, default=20,
                         help='maximum number of epochs to train without improvement of the validation loss(default: 140)')
     
     parser.add_argument('--lr-decay-patience','--lr_decay_patience',type=int,
-                        default=80, help='lr decay patience for plateau scheduler')
+                        default=10, help='lr decay patience for plateau scheduler')
                         
     parser.add_argument('--lr-decay-gamma','--lr_decay_gamma', type=float,
                         default=0.3, help='gamma of learning rate scheduler decay')
@@ -123,6 +123,9 @@ def main():
             
     parser.add_argument('--tb', default=None,
                         help='use tensorboard, and if so, set name')
+    
+    parser.add_argument('--bottleneck-size', default=8,
+                        help='Set the bottleneck size')
         
     args, _ = parser.parse_known_args()
     
@@ -181,7 +184,8 @@ def main():
     
         
     autoencoder = model.Autoencoder(
-        number_of_phonemes=number_of_phonemes
+        number_of_phonemes=number_of_phonemes,
+        bottleneck_size=args.bottleneck_size
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -197,7 +201,7 @@ def main():
         cooldown=10
     )
 
-    es = utils.EarlyStopping(patience=args.patience)
+    es = utils_encoder.EarlyStopping(patience=args.patience)
     
     # Use tensorboard if specified as an argument
     if args.tb is not None:
@@ -282,9 +286,10 @@ def main():
         if valid_loss == es.best:
             best_epoch = epoch
         
-        utils.save_checkpoint({
+        utils_encoder.save_checkpoint({
                 'epoch': epoch + 1,
                 'state_dict': autoencoder.state_dict(),
+                'encoder_state_dict': autoencoder.encoder.state_dict(),
                 'best_loss': es.best,
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
