@@ -25,6 +25,15 @@ def get_sec(time_str):
     return int(m) * 60 + int(s)
 
 
+# enforce deterministic behavior
+def seed_all(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 def evalTargets(args,device,typee):
     
     root = args.root
@@ -294,7 +303,9 @@ if __name__ == '__main__':
         # load model from disk, there should be only one target
         with open(Path(model_path, args.targets[0] + '.json'), 'r') as stream:
             results = json.load(stream)
-        
+    
+    seed_all(results['args']['seed'])
+    
     """
     types
     

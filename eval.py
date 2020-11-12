@@ -16,6 +16,15 @@ import numpy as np
 
 from utils import memory_check
 
+# enforce deterministic behavior
+def seed_all(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 def evalTargets(joint,args,device):
     mus = musdb.DB(
         root=args.root,
@@ -214,6 +223,8 @@ if __name__ == '__main__':
         joint = results['args']['joint']
     except:
         joint = True
+    
+    seed_all(results['args']['seed'])
     
     SI_SDRscores_vocals,SDRscores_vocals, SI_SDRscores_accompaniment,SDRscores_accompaniment,tracks = evalTargets(joint,args,device)
     
