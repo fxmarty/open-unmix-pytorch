@@ -8,74 +8,62 @@ import numpy as np
 import matplotlib.patheffects as path_effects
 
 """
-This piece of code allows to get comprehensive metrics from a folder with .json files containing the separation metrics computed with museval module, and so for each track (e.g. in the test set of MUSDB18).
-
-Note that museval yields a single value for each metric at each window, even if the signal is stereo.
+This piece of code allows to get comprehensive metrics from a folder with .json files containing the separation metrics, and so for each track (e.g. in the test set of MUSDB18).
 """
-def fill_df(all_types_all_exps,rootdirs,exp_names):
-    """
-    types
-    
-    x: no vocals
-    n: 1 singer
-    s: 2+ singers, sing the same text (but maybe different notes)
-    d: 2+ singers, singing different phonemes
-    """
-    types = ['d','n','s']
-    
+def fill_df(all_types_all_exps,rootdirs,exp_names):    
     for i,rootdir in enumerate(rootdirs):
         metrics = {}
+        metrics["explode_key"] = {}
         
-        for subtype in types:
-            metrics[subtype] = {} # initialization for one subtype
-            first_file = True
-            for filename in sorted(os.listdir(rootdir+'/'+subtype)):
-                if filename.endswith('.json'):
-                    with open(rootdir+'/'+subtype+'/' + filename) as jsonfile:
-                        #print(rootdir + filename)
-                        data = json.load(jsonfile)
-                    
-                    data_df = pd.DataFrame(data)
-                    
-                    # we initialize each metric name with an empty list
-                    if first_file:
-                        metrics_keys = list(data_df[0][0])
-                        for key in metrics_keys:
-                            metrics[subtype][key] = []
-                        first_file = False
-                    
-                    # we use the median over the file already stored in the .json
+        first_file = True
+        for filename in sorted(os.listdir(rootdir)):
+            if filename.endswith('.json'):
+                with open(rootdir+'/'+filename) as jsonfile:
+                    #print(rootdir + filename)
+                    data = json.load(jsonfile)
+                
+                data_df = pd.DataFrame(data)
+                
+                # we initialize each metric name with an empty list
+                if first_file:
+                    metrics_keys = list(data_df[0][0])
                     for key in metrics_keys:
-                        metrics[subtype][key].append(data_df[0][0][key])
+                        metrics["explode_key"][key] = []
+                    first_file = False
+                
+                # we use the median over the file already stored in the .json
+                for key in metrics_keys:
+                    metrics["explode_key"][key].append(data_df[0][0][key])
         
         metrics_df = pd.DataFrame.from_dict(metrics)    
         
-        all_types = pd.DataFrame(columns=['metric','subset_type','value','exp','exp_number','file_number'])
+        all_types = pd.DataFrame(columns=['metric','value','exp','exp_number','file_number'])
         
-        for subtype in types:            
-            # add a column for the metrics name
-            subdf = metrics_df[subtype].to_frame().explode(subtype)
+        # add a column for the metrics name
+        #subdf = metrics_df.to_frame()#.explode(subtype)
+        subdf = metrics_df["explode_key"].to_frame().explode("explode_key")
+        
+        # add index column and rename wrongly named 'index' column to 'metric'
+        subdf = subdf.reset_index() 
+        subdf = subdf.rename(columns = {"index" : "metric"})
+        
+        # value_vars goes into a column, while id_vars stays as a column renamed
+        # as 'value'
+        subdf = pd.melt(subdf, id_vars=['metric'], 
+                        value_vars=["explode_key"],var_name='bidon',
+                        value_name='value')
+        del subdf['bidon']
+        
+        subdf['file_number'] = subdf.index
+        
+        # to avoid unexplained bug "ValueError: List of boxplot statistics and 
+        # `positions` values must have same the length"
+        # see https://stackoverflow.com/questions/42437711/numpy-memap-pandas-dataframe-and-seaborn-boxplot-troubles
+        subdf.to_csv('tempo.csv',index=False)
+        subdf = pd.read_csv('tempo.csv')
             
-            # add index column and rename wrongly named 'index' column to 'metric'
-            subdf = subdf.reset_index() 
-            subdf = subdf.rename(columns = {"index" : "metric"})
-            
-            # value_vars goes into a column, while id_vars stays as a column renamed
-            # as 'value'
-            subdf = pd.melt(subdf, id_vars=['metric'], 
-                            value_vars=[subtype],var_name='subset_type',
-                            value_name='value')
-            
-            subdf['file_number'] = subdf.index
-            
-            # to avoid unexplained bug "ValueError: List of boxplot statistics and 
-            # `positions` values must have same the length"
-            # see https://stackoverflow.com/questions/42437711/numpy-memap-pandas-dataframe-and-seaborn-boxplot-troubles
-            subdf.to_csv('tempo.csv',index=False)
-            subdf = pd.read_csv('tempo.csv')
-            
-            all_types = pd.concat([all_types,subdf])
-            
+        all_types = pd.concat([all_types,subdf])
+        
         
         all_types['exp'] = exp_names[i]
         all_types['exp_number'] = i
@@ -113,13 +101,13 @@ def show_boxplot(df,metric_list):
         filtered_df = all_types_all_exps[all_types_all_exps['metric'] == metric_name]
         
         # mean over each file
-        filtered_df = filtered_df.groupby(['metric','exp','subset_type','file_number'],as_index = False)['value'].mean()
-        plt.figure()
-        
+        filtered_df = filtered_df.groupby(['metric','exp','file_number'],as_index = False)['value'].mean()
+
+        plt.figure(figsize=[3.5,5])
+        sns.set_style("whitegrid")
         showfliers = False
         showmeans = True
-        sns.set_style("whitegrid")
-        box_plot = sns.boxplot(x='subset_type', y='value',hue='exp',
+        box_plot = sns.boxplot(x='exp', y='value',#hue='exp',
                         data=filtered_df,
                         whis=[10, 90],
                         flierprops = dict(markerfacecolor = '0.50',
@@ -131,11 +119,13 @@ def show_boxplot(df,metric_list):
                             "markeredgecolor":"black",
                             "markersize":"5"},
                         #color="w",
-                        width=0.8
-                        )       
+                        width=0.8,
+                        )
+        #box_plot.set(xlim=(-5, 5))
         create_median_labels(box_plot.axes, showfliers, showmeans)
-        plt.title(metric_name)
-        plt.savefig('sub_'+metric_name+'.png', dpi=300)
+        plt.title(metric_name,fontsize=12)
+        plt.tight_layout()
+        plt.savefig(metric_name+'.png', dpi=300)
     #plt.setp(ax.artists, edgecolor = 'k', facecolor='w')
     #plt.setp(ax.lines, color='k')
     
@@ -179,12 +169,12 @@ if __name__ == "__main__":
     pd.set_option('display.max_columns', None)
     duplicate = len(exp_names) != len(set(exp_names))
     
-    all_types_all_exps = pd.DataFrame(columns=['metric','subset_type',
+    all_types_all_exps = pd.DataFrame(columns=['metric',
                                                 'value','exp'])
     
     
-    all_types_all_exps = fill_df(all_types_all_exps,rootdirs,exp_names)
     
+    all_types_all_exps = fill_df(all_types_all_exps,rootdirs,exp_names)
     
     #pd.set_option('display.max_rows', 50)
     """
