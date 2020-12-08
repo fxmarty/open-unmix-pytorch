@@ -20,53 +20,26 @@ class PhonemeNetwork(nn.Module):
         self,
         phoneme_hidden_size,
         number_of_phonemes,
-        fft_window_duration,
-        fft_hop_duration,
-        center
     ):
         super(PhonemeNetwork, self).__init__()
         
         
         self.fc1Phoneme = nn.Sequential(
-                            Linear(number_of_phonemes, 40),
-                            nn.ReLU()
-                            )
+                        nn.Linear(number_of_phonemes,32,bias=False),
+                        nn.ReLU()
+                )
         
         self.fc2Phoneme = nn.Sequential(
-                            Linear(40, 20),
-                            nn.ReLU(),
-                            nn.Dropout(0.5)
-                            )
+                        nn.Linear(32,16,bias=False),
+                        nn.ReLU()
+                )
         
         self.fc3Phoneme = nn.Sequential(
-                            Linear(20, phoneme_hidden_size),
-                            nn.ReLU()
-                            )
-        
-        
-        self.lstmPhoneme = LSTM(
-            input_size=phoneme_hidden_size,
-            #input_size=number_of_phonemes,
-            hidden_size=phoneme_hidden_size//2,
-            num_layers=2,
-            bidirectional=True,
-            batch_first=True,
-            dropout=0.3
-        )
-        
-        self.fft_window_duration = fft_window_duration
-        self.fft_hop_duration = fft_hop_duration
-        self.center = center
+                        nn.Linear(16,phoneme_hidden_size,bias=False),
+                        nn.ReLU(),
+                )
     
-    def forward(self, phoneme,nb_frames,offset):
-        """
-        #out [nb_samples, nb_frames, nb_phonemes]
-        phoneme = time_transform_posteriograms.open_unmix(
-                            phoneme,nb_frames,0.016,
-                            self.fft_window_duration,self.fft_hop_duration,
-                            center=self.center,offset=offset)
-        """
-        
+    def forward(self, phoneme):
         nb_samples, nb_frames,nb_phonemes = phoneme.shape
         
         # out [nb_samples, nb_frames, 40]
@@ -77,13 +50,10 @@ class PhonemeNetwork(nn.Module):
         
         # out [nb_samples, nb_frames, phoneme_hidden_size]
         phoneme = self.fc3Phoneme(phoneme)
-            
-        # out [nb_samples, nb_frames, phoneme_hidden_size]
-        phoneme = self.lstmPhoneme(phoneme)[0]
         
         # to adapt to open-unmix, reshape to
         # [nb_frames,nb_samples,phoneme_hidden_size]
-        phoneme = phoneme.reshape(nb_frames,nb_samples,-1)
+        phoneme = torch.transpose(phoneme,0,1)
         
         return phoneme
 
@@ -95,7 +65,7 @@ class OpenUnmix(nn.Module):
         normalization_style="overall",
         input_is_spectrogram=False,
         hidden_size=512,
-        phoneme_hidden_size=16, # hyperparameter
+        phoneme_hidden_size=8, # hyperparameter
         nb_channels=2,
         sample_rate=16000,
         nb_layers=3,
@@ -186,9 +156,6 @@ class OpenUnmix(nn.Module):
         self.phoneme_network = PhonemeNetwork(
                                     phoneme_hidden_size=phoneme_hidden_size,
                                     number_of_phonemes=number_of_phonemes,
-                                    fft_window_duration=n_fft/self.sp_rate,
-                                    fft_hop_duration=n_hop/self.sp_rate,
-                                    center=False
                                 )
     
     def forward(self, x, phoneme,offset=0):
@@ -225,7 +192,7 @@ class OpenUnmix(nn.Module):
         """
         
         # out [nb_frames,nb_samples,phoneme_hidden_size]
-        phoneme = self.phoneme_network(phoneme,nb_frames,offset=offset)
+        phoneme = self.phoneme_network(phoneme)
         
         """
         plt.imshow(phoneme[begin:begin+length,0].detach().cpu().numpy(),
