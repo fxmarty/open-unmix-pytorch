@@ -2,6 +2,59 @@ import torch
 import math
 import numpy as np
 
+def sdr(estimates, targets,eps=1e-8,scale_invariant=True):
+    """
+    input:
+          estimates: separated signals, (batch_size,nb_channels,nb_samples)
+                        OR (nb_channels,nb_samples) OR (nb_samples) tensor
+          targets: reference signals, (batch_size,nb_channels,nb_samples) 
+                        OR (nb_channels,nb_samples) OR (nb_samples) tensor
+    Return:
+          sisdr: SI-SDR mean over all samples in a batch
+    """
+    
+    if type(estimates) == np.ndarray:
+        estimates = torch.from_numpy(estimates)
+        targets = torch.from_numpy(targets)
+    
+    if estimates.shape != targets.shape:
+        raise RuntimeError(
+            "Dimention mismatch when calculate si-snr, {} vs {}".format(
+                estimates.shape, targets.shape))
+        
+    if len(estimates.shape) == 1: # add batch and channel dimension
+        estimates = estimates[None,None,...]
+        targets = targets[None,None,...]
+    
+    if len(estimates.shape) == 2: # add batch dimension
+        estimates = estimates[None,...]
+        targets = targets[None,...]
+    
+    batch_size,nb_channels,nb_samples = estimates.shape
+    
+    # reshaped [batch_size,nb_channels,1, nb of samples]
+    estimates_reshaped = estimates.view(batch_size,nb_channels,1,-1)
+    targets_reshaped = targets.view(batch_size,nb_channels,1,-1)
+    
+    if scale_invariant == True:
+        # scaling [batch_size,nb_channels,1,1]
+        scaling = torch.sum(estimates_reshaped * targets_reshaped, dim=-1,keepdim=True) / (torch.sum(targets_reshaped * targets_reshaped, dim=-1, keepdim=True) + eps)
+        e_target = scaling * targets_reshaped
+    else:
+        e_target = targets_reshaped
+    # e_target [batch_size,nb_channels,1,nb of samples]
+        
+    e_residual = estimates_reshaped - e_target
+
+    # Starg [batch_size,nb_channels,1]
+    Starg= torch.sum(e_target**2,dim=-1,keepdim=True).view(batch_size,nb_channels,-1)
+    Sres= torch.sum(e_residual**2,dim=-1,keepdim=True).view(batch_size,nb_channels,-1)
+        
+    # SI_SDR [batch_size,nb_channels,1]
+    SI_SDR = 10*torch.log10(Starg/(eps+Sres) + eps)
+    
+    return torch.mean(SI_SDR).item() # returns a float!
+
 def sisdr_framewise(estimates, targets, sample_rate,eps=1e-8,scale_invariant=True):
     """
     input:
@@ -61,6 +114,14 @@ def ideal_SDR_framewise(estimates, targets, sample_rate):
 
     return sisdr_framewise(torch_estimate_ideal, targets,
                         sample_rate,scale_invariant=False,eps=0)
+
+def ideal_SDR(estimates, targets):
+    torch_factor_ideal = torch.sum(estimates*targets,dim=-1)/torch.sum(estimates*estimates,dim=-1)
+    torch_factor_ideal = torch.unsqueeze(torch_factor_ideal,dim=-1)
+    
+    torch_estimate_ideal = torch_factor_ideal * estimates
+
+    return sdr(torch_estimate_ideal, targets,scale_invariant=False,eps=0)
     
 def loss_SI_SDR(SI_SDR_framewise,eps=1e-8):
     if eps == 0:
