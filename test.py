@@ -60,7 +60,6 @@ def load_model(target,number_of_phonemes, model_name='umxhq', device='cpu'):
                 bottleneck_size=results['args']['bottleneck_size']
             )
         unmix.stft.center = True
-        unmix.phoneme_network.center = True
         unmix.load_state_dict(state) # Load saved model
         unmix.eval()
         unmix.to(device)
@@ -171,8 +170,10 @@ def separate(
             
             if args['args']['fake'] == True or enforce_fake:
                 phoneme = torch.zeros(phoneme.shape).to(device)
-                phoneme[...,3] = 1
-                print("Beware that fake phoneme has been used.")
+                #indice = np.random.randint(0,number_of_phonemes)
+                #phoneme[...,indice] = 1
+                #print("Beware that fake phoneme has been used (one phoneme activated randomly).")
+                print("Beware that fake phoneme has been used (0 everywhere).")
             
             # add padding to the mixture to have a complete window
             # for the last frame
@@ -188,7 +189,7 @@ def separate(
 
             source_names += [target]
             
-            if modelname in ('open-unmix') and softmask:
+            if softmask:
                 # only exponentiate the model if we use softmask
                 Vj = Vj**alpha
     
@@ -196,17 +197,16 @@ def separate(
         
         estimates = {}
         
-        if modelname in ('open-unmix'):
-            V = np.transpose(np.array(V), (1, 3, 2, 0))
-            #V mask of shape (nb_frames, nb_bins, 2,nb_targets),
-            # real values
-            
-            X = unmix_target.stft(mixture).detach().cpu().numpy()
-            
-            # convert to complex numpy type
-            X = X[..., 0] + X[..., 1]*1j
-            X = X[0].transpose(2, 1, 0)
-            # X shape (nb_frames, nb_bins, 2). Complex numbers
+        V = np.transpose(np.array(V), (1, 3, 2, 0))
+        #V mask of shape (nb_frames, nb_bins, 2,nb_targets),
+        # real values
+        
+        X = unmix_target.stft(mixture).detach().cpu().numpy()
+        
+        # convert to complex numpy type
+        X = X[..., 0] + X[..., 1]*1j
+        X = X[0].transpose(2, 1, 0)
+        # X shape (nb_frames, nb_bins, 2). Complex numbers
         
         if residual_model or len(targets) == 1:
             V = norbert.residual_model(V, X, alpha if softmask else 1)
