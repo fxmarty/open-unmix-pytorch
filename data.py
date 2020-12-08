@@ -260,8 +260,9 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     
                     if self.fake:
                         phoneme = torch.zeros(phoneme.shape)
-                        indice = np.random.randint(0,65)
-                        phoneme[...,indice] = 1
+                        #nb_of_phonemes = phoneme.shape[-1]
+                        #indice = np.random.randint(0,nb_of_phonemes)
+                        #phoneme[...,indice] = 1
                     
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
@@ -308,12 +309,13 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
             phoneme = self.phonemes_dict[track.name][:nbFrames]
             
             if self.fake:
-                phoneme = torch.zeros(phoneme.shape)
                 # numpy has a different random stack than random, that's why we use
                 # it in the fake case to enable reproductability (same samples
                 # between fake and non-fake versions)
-                indice = np.random.randint(0,65)
-                phoneme[...,indice] = 1
+                phoneme = torch.zeros(phoneme.shape)
+                #nb_of_phonemes = phoneme.shape[-1]
+                #indice = np.random.randint(0,nb_of_phonemes)
+                #phoneme[...,indice] = 1
             
             # select left or right depending on index even or not
             if self.nb_channels == 1: 
