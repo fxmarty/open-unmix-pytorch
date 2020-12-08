@@ -106,7 +106,7 @@ def create_median_labels(ax, has_fliers,has_mean):
             path_effects.Normal(),
         ])
 
-def show_boxplot(df,metric_list):
+def show_boxplot(df,metric_list,file_head):
     metric_list = all_types_all_exps.metric.unique()
     
     for metric_name in metric_list:
@@ -135,7 +135,8 @@ def show_boxplot(df,metric_list):
                         )       
         create_median_labels(box_plot.axes, showfliers, showmeans)
         plt.title(metric_name)
-        plt.savefig('sub_'+metric_name+'.png', dpi=300)
+        plt.tight_layout()
+        plt.savefig(file_head+'_sub_'+metric_name+'.png', dpi=300)
     #plt.setp(ax.artists, edgecolor = 'k', facecolor='w')
     #plt.setp(ax.lines, color='k')
     
@@ -162,6 +163,12 @@ if __name__ == "__main__":
         action='append',
         help='Experiment name corresponding to the previous root folder',
         #required=True
+    )
+    
+    parser.add_argument(
+        '--file-head',
+        type=str,
+        help='Head for name of files for evaluation'
     )
 
     args, _ = parser.parse_known_args()
@@ -191,4 +198,4 @@ if __name__ == "__main__":
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(all_types_all_exps)
     """
-    show_boxplot(all_types_all_exps,exp_names)
+    show_boxplot(all_types_all_exps,exp_names,args.file_head)

@@ -6,11 +6,12 @@ import argparse
 import seaborn as sns
 import numpy as np
 import matplotlib.patheffects as path_effects
+import math
 
 """
 This piece of code allows to get comprehensive metrics from a folder with .json files containing the separation metrics, and so for each track (e.g. in the test set of MUSDB18).
 """
-def fill_df(all_types_all_exps,rootdirs,exp_names):    
+def fill_df(all_types_all_exps,rootdirs,exp_names,framewise):    
     for i,rootdir in enumerate(rootdirs):
         metrics = {}
         metrics["explode_key"] = {}
@@ -24,23 +25,37 @@ def fill_df(all_types_all_exps,rootdirs,exp_names):
                 
                 data_df = pd.DataFrame(data)
                 
-                # we initialize each metric name with an empty list
-                if first_file:
-                    metrics_keys = list(data_df[0][0])
+                if framewise == False:
+                    # we initialize each metric name with an empty list
+                    if first_file:
+                        metrics_keys = list(data_df[0][0])
+                        for key in metrics_keys:
+                            metrics["explode_key"][key] = []
+                        first_file = False
+                    
+                    # we use the median over the file already stored in the .json
                     for key in metrics_keys:
-                        metrics["explode_key"][key] = []
-                    first_file = False
+                        metrics["explode_key"][key].append(data_df[0][0][key])
                 
-                # we use the median over the file already stored in the .json
-                for key in metrics_keys:
-                    metrics["explode_key"][key].append(data_df[0][0][key])
+                elif framewise == True:
+                    # we initialize each metric name with an empty list
+                    if first_file:
+                        metrics_keys = list(data_df.T[1][0]["metrics"].keys())
+                        for key in metrics_keys:
+                            metrics["explode_key"][key] = []
+                        first_file = False
+                    
+                    # we append the metrics for each frame, median is computed later
+                    for key in metrics_keys:
+                        for frame in data_df.T[1]: # over frames
+                            if math.isfinite(frame["metrics"][key]):
+                                metrics["explode_key"][key].append(frame["metrics"][key])
         
         metrics_df = pd.DataFrame.from_dict(metrics)    
         
         all_types = pd.DataFrame(columns=['metric','value','exp','exp_number','file_number'])
         
         # add a column for the metrics name
-        #subdf = metrics_df.to_frame()#.explode(subtype)
         subdf = metrics_df["explode_key"].to_frame().explode("explode_key")
         
         # add index column and rename wrongly named 'index' column to 'metric'
@@ -94,7 +109,7 @@ def create_median_labels(ax, has_fliers,has_mean):
             path_effects.Normal(),
         ])
 
-def show_boxplot(df,metric_list):
+def show_boxplot(df,metric_list,framewise,file_head):
     metric_list = all_types_all_exps.metric.unique()
     
     for metric_name in metric_list:
@@ -103,7 +118,8 @@ def show_boxplot(df,metric_list):
         # mean over each file
         filtered_df = filtered_df.groupby(['metric','exp','file_number'],as_index = False)['value'].mean()
 
-        plt.figure(figsize=[3.5,5])
+        plt.figure(figsize=[4,5])
+        #plt.figure()
         sns.set_style("whitegrid")
         showfliers = False
         showmeans = True
@@ -125,7 +141,10 @@ def show_boxplot(df,metric_list):
         create_median_labels(box_plot.axes, showfliers, showmeans)
         plt.title(metric_name,fontsize=12)
         plt.tight_layout()
-        plt.savefig(metric_name+'.png', dpi=300)
+        if framewise == False:
+            plt.savefig(file_head+'_songwise_'+metric_name+'.png', dpi=300)
+        elif framewise == True:
+            plt.savefig(file_head+'_framewise_'+metric_name+'.png', dpi=300)
     #plt.setp(ax.artists, edgecolor = 'k', facecolor='w')
     #plt.setp(ax.lines, color='k')
     
@@ -142,18 +161,28 @@ if __name__ == "__main__":
         '--root','-r',
         type=str,
         action='append',
-        help='Path to the directory with .json files, e.g. expName/evalDir_sub',
-        #required=True
+        help='Path to the directory with .json files, e.g. expName/evalDir_sub'
     )
     
     parser.add_argument(
         '--name', '-n',
         type=str,
         action='append',
-        help='Experiment name corresponding to the previous root folder',
-        #required=True
+        help='Experiment name corresponding to the previous root folder'
     )
-
+    
+    parser.add_argument(
+        '--file-head',
+        type=str,
+        help='Head for name of files for evaluation'
+    )
+    
+    parser.add_argument(
+        '--framewise',
+        action='store_true', default=False,
+        help='If set, metrics will be ploted using framewise metrics to compute the boxplots and NOT the songwise metrics (already median over song)'
+    )
+    
     args, _ = parser.parse_known_args()
     
     rootdirs = args.root
@@ -161,24 +190,19 @@ if __name__ == "__main__":
     
     for i,experiment_path in enumerate(rootdirs):
         rootdirs[i] = '/tsi/doctorants/fmarty/executedJobs/'+experiment_path
-    
-    #rootdirs = ['/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub','/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub_bis','/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub']
-    
-    #exp_names = ["Phoneme", "Fake", "Fake"]
-    
+
     pd.set_option('display.max_columns', None)
     duplicate = len(exp_names) != len(set(exp_names))
     
     all_types_all_exps = pd.DataFrame(columns=['metric',
                                                 'value','exp'])
     
+    #pd.set_option('display.max_columns', None)  # or 1000
+    #pd.set_option('display.max_rows', None)  # or 1000
+    #pd.set_option('display.max_colwidth', -1)  # or 199
+
     
+    all_types_all_exps = fill_df(all_types_all_exps,rootdirs,
+                        exp_names,args.framewise)
     
-    all_types_all_exps = fill_df(all_types_all_exps,rootdirs,exp_names)
-    
-    #pd.set_option('display.max_rows', 50)
-    """
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-        print(all_types_all_exps)
-    """
-    show_boxplot(all_types_all_exps,exp_names)
+    show_boxplot(all_types_all_exps,exp_names,args.framewise,args.file_head)
