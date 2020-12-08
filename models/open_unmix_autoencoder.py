@@ -117,10 +117,12 @@ class OpenUnmix(nn.Module):
             torch.ones(self.nb_bins).float()
         )
         
-
+        # for phoneme processing
+        
         self.phoneme_encoder = Encoder(number_of_phonemes=number_of_phonemes,
                                        bottleneck_size=bottleneck_size
                                     )
+    
     
     def forward(self, x, phoneme):
         # check for waveform or spectrogram
@@ -170,7 +172,7 @@ class OpenUnmix(nn.Module):
 
         # out [nb_frames, nb_samples,hidden_size+bottleneck_size]
         x = torch.cat([x,phoneme],dim=-1)
-
+        
         # apply 3-layers of stacked LSTM
         lstm_out = self.lstm(x)
 

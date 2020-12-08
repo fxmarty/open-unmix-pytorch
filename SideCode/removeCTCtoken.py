@@ -20,8 +20,8 @@ def moveCTCTokenIntoMatrix(phoneme):
     return output
 
 if __name__ == '__main__':
-    exp_name = '10-19_trueVocals_unique'
-    path = '/tsi/doctorants/fmarty/Posteriograms/MUSDB18_trueVocals_posteriogram'
+    exp_name = '11-10_polyphonic_ctc_moved'
+    path = '/tsi/doctorants/fmarty/Posteriograms/MUSDB18_polyphonic'
     files = sorted(os.listdir(path))
     outPath = '/tsi/doctorants/fmarty/Posteriograms/' + exp_name
    

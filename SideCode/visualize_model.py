@@ -21,45 +21,8 @@ sys.path.insert(0,parentdir+'/models/')
 
 import open_unmix
 import utils
+import test
 
-def load_model(target, model_name='umxhq', device='cpu'):
-    """
-    target model path can be either <target>.pth, or <target>-sha256.pth
-    (as used on torchub)
-    """
-    model_path = Path(model_name).expanduser()
-
-    if not model_path.exists():
-        raise NameError('Model path is wrong')
-            # assume model is a path to a local model_name directory
-    else:
-        # load model from disk
-        with open(Path(model_path, target + '.json'), 'r') as stream:
-            results = json.load(stream)
-
-        target_model_path = next(Path(model_path).glob("%s*.pth" % target))
-        state = torch.load(
-            target_model_path,
-            map_location=device
-        )
-        
-        if results['args']['modelname'] == 'open-unmix':
-            unmix = open_unmix.OpenUnmix(
-                normalization_style=results['args']['normalization_style'],
-                n_fft=results['args']['nfft'],
-                n_hop=results['args']['nhop'],
-                nb_channels=results['args']['nb_channels'],
-                hidden_size=results['args']['hidden_size']
-            )
-            unmix.stft.center = True
-            unmix.phoneme_network.center = True
-            
-        unmix.load_state_dict(state) # Load saved model
-        unmix.eval()
-        unmix.to(device)
-            
-        return unmix,results
-        
 def resize_graph(dot, size_per_element=0.15, min_size=12):
     """Resize the graph according to how much content it contains.
     Modify the graph in place.
@@ -107,13 +70,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, help='Path to model folder')
     
     args, _ = parser.parse_known_args()
-    
-    model,hyperparameters = load_model(target='vocals',
-                                       model_name=args.model,
-                                       device=device)
-    
-    #print(model)
-    
+        
     mix_path = '/tsi/doctorants/fmarty/Datasets/MUSDB18_16000wav/test/The Long Wait - Dark Horses/mixture.wav'
     
     phoneme = torch.load('/tsi/doctorants/fmarty/Posteriograms/10-12_fullPosteriogramsNoProcessing/test_The Long Wait - Dark Horses.pt')
@@ -127,11 +84,17 @@ if __name__ == '__main__':
     nb_time_points = mix.shape[1]
     nb_phoneme_frames = math.ceil((nb_time_points - 512)/256 + 1)
     phoneme = phoneme[:nb_phoneme_frames]
+    number_of_phonemes = phoneme.shape[1]
+    
+    model,hyperparameters = test.load_model(target='vocals',
+                                       model_name=args.model,
+                                       device=device,
+                                       number_of_phonemes=number_of_phonemes)
     
     # this is because 'center=True' option from STFT adds n_fft/2 padding
     # at the beginning and end, corresponding to one phoneme frame
-    phoneme = torch.cat([torch.zeros(1,65),phoneme,torch.zeros(1,65)],dim=0)
-    
+    phoneme = torch.cat([torch.zeros(1,number_of_phonemes),phoneme,torch.zeros(1,number_of_phonemes)],dim=0)
+
     # add padding to the mixture to have a complete window
     # for the last frame
     mix, padding = utils.pad_for_stft(mix,
@@ -140,6 +103,25 @@ if __name__ == '__main__':
     # Add batch dimension
     mix = mix[None,...].to(device)
     phoneme = phoneme[None,...].to(device)
+    
+    i = 0
+    for name, W in model.named_parameters():
+        print(name,W.shape)
+        """
+        if name.startswith('lstm.weight') or name.startswith('phoneme_network.lstmPhoneme'):
+            
+            if len(W.shape) == 1:
+                Wcp = torch.unsqueeze(W,0).detach().cpu().numpy()
+            else:
+                Wcp =W.detach().cpu().numpy()
+            
+            plt.imshow(Wcp,interpolation='none',aspect='auto')
+            plt.colorbar()
+            plt.savefig(str(i) + '_'+name+'.png',dpi=1200,bbox_inches='tight')
+            plt.close("all")
+            plt.clf()
+            i = i + 1
+        """
     
     res = model(mix,phoneme)   
     dot = make_dot(res,params={**{'inputs': mix}, **dict(model.named_parameters())})
