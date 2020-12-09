@@ -4,13 +4,23 @@ import numpy as np
 
 def sdr(estimates, targets,eps=1e-8,scale_invariant=True):
     """
-    input:
-          estimates: separated signals, (batch_size,nb_channels,nb_samples)
-                        OR (nb_channels,nb_samples) OR (nb_samples) tensor
-          targets: reference signals, (batch_size,nb_channels,nb_samples) 
-                        OR (nb_channels,nb_samples) OR (nb_samples) tensor
+    Input:
+        estimates: torch.tensor or numpy.array
+            separated signals, of shape (batch_size,nb_channels,nb_samples)
+            OR (nb_channels,nb_samples) OR (nb_samples) tensor
+        targets: torch.tensor or numpy.array
+            reference signals, (batch_size,nb_channels,nb_samples) 
+            OR (nb_channels,nb_samples) OR (nb_samples) tensor
+        eps : float
+            a small value that may be set to avoid divison by 0 and log(0)
+        scale_invariant : boolean
+            decide between the scale invariant version SI-SDR, or traditional SDR
     Return:
-          sisdr: SI-SDR mean over all samples in a batch
+        - If scale_invariant=True : returns SI-SDR computed over each batch, channel
+                                    that is then averaged over batch and channels.
+        
+        - If scale_invariant=False : returns SDR computed over each batch, channel
+                                    that is then averaged over batch and channels.
     """
     
     if type(estimates) == np.ndarray:
@@ -36,7 +46,7 @@ def sdr(estimates, targets,eps=1e-8,scale_invariant=True):
     estimates_reshaped = estimates.view(batch_size,nb_channels,1,-1)
     targets_reshaped = targets.view(batch_size,nb_channels,1,-1)
     
-    if scale_invariant == True:
+    if scale_invariant == True: # SI-SDR case
         # scaling [batch_size,nb_channels,1,1]
         scaling = torch.sum(estimates_reshaped * targets_reshaped, dim=-1,keepdim=True) / (torch.sum(targets_reshaped * targets_reshaped, dim=-1, keepdim=True) + eps)
         e_target = scaling * targets_reshaped
@@ -57,14 +67,22 @@ def sdr(estimates, targets,eps=1e-8,scale_invariant=True):
 
 def sisdr_framewise(estimates, targets, sample_rate,eps=1e-8,scale_invariant=True):
     """
-    input:
-          estimates: separated signals, (batch_size,nb_channels,nb_samples)
-                        OR (nb_channels,nb_samples) tensor
-          targets: reference signals, (batch_size,nb_channels,nb_samples) 
-                        OR (nb_channels,nb_samples) tensor tensor
-          sample_rate: sample rate of the estimates and targets
+    Input:
+        estimates: torch.tensor
+            separated signals, of shape (batch_size,nb_channels,nb_samples) or
+            (nb_channels,nb_samples)
+        targets: torch.tensor
+            reference signals, of shape (batch_size,nb_channels,nb_samples) or
+            (nb_channels,nb_samples)
+        sample_rate: int
+            sample rate of the estimates and targets
+        eps : float
+            a small value that may be set to avoid divison by 0 and log(0)
+        scale_invariant : boolean
+            decide between the scale invariant version SI-SDR, or traditional SDR
     Return:
-          sisdr: SI-SDR mean over all samples in a batch
+        SI-SDR over each seconds for each batch and channels, i.e. of shape 
+        (batch_size,nb_channels,number of seconds)
     """
 
     if estimates.shape != targets.shape:
@@ -107,6 +125,23 @@ def sisdr_framewise(estimates, targets, sample_rate,eps=1e-8,scale_invariant=Tru
     return SI_SDR
 
 def ideal_SDR_framewise(estimates, targets, sample_rate):
+    """
+    Input:
+        estimates: torch.tensor
+            separated signals, of shape (batch_size,nb_channels,nb_samples) or
+            (nb_channels,nb_samples)
+        targets: torch.tensor
+            reference signals, of shape (batch_size,nb_channels,nb_samples) or
+            (nb_channels,nb_samples)
+        sample_rate: int
+            sample rate of the estimates and targets
+    Return:
+        SDR over each seconds for each batch and channels, i.e. of shape 
+        (batch_size,nb_channels,number of seconds). A scaling has been applied
+        to the estimates, so as to obtain the highest SDR value to make this 
+        metric unsensitive to scale
+    """
+    
     torch_factor_ideal = torch.sum(estimates*targets,dim=-1)/torch.sum(estimates*estimates,dim=-1)
     torch_factor_ideal = torch.unsqueeze(torch_factor_ideal,dim=-1)
     
@@ -116,52 +151,23 @@ def ideal_SDR_framewise(estimates, targets, sample_rate):
                         sample_rate,scale_invariant=False,eps=0)
 
 def ideal_SDR(estimates, targets):
+    """
+    Input:
+        estimates: torch.tensor
+            separated signals, of shape (batch_size,nb_channels,nb_samples) or
+            (nb_channels,nb_samples) or (nb_samples)
+        targets: torch.tensor
+            reference signals, of shape (batch_size,nb_channels,nb_samples) or
+            (nb_channels,nb_samples) or (nb_samples)
+    Return:
+        SDR computed over each batch, channel that is then averaged over batch
+        and channels. A scaling has been applied to the estimates, so as to 
+        obtain the highest SDR value to make this metric unsensitive to scale
+    """
+    
     torch_factor_ideal = torch.sum(estimates*targets,dim=-1)/torch.sum(estimates*estimates,dim=-1)
     torch_factor_ideal = torch.unsqueeze(torch_factor_ideal,dim=-1)
     
     torch_estimate_ideal = torch_factor_ideal * estimates
 
     return sdr(torch_estimate_ideal, targets,scale_invariant=False,eps=0)
-    
-def loss_SI_SDR(SI_SDR_framewise,eps=1e-8):
-    if eps == 0:
-        SI_SDR_framewise = SI_SDR_framewise[torch.isfinite(SI_SDR_framewise)]
-    # return mean over all samples in a batch and channels
-    return torch.mean(SI_SDR_framewise) 
-
-def metric_SI_SDR(SI_SDR_framewise,eps=1e-8):
-    if eps == 0:
-        SI_SDR_finite = SI_SDR_framewise[torch.isfinite(SI_SDR_framewise)]
-    else:
-        SI_SDR_finite = SI_SDR_framewise
-    
-    # return mean over all samples in a batch and channels
-    return np.median(SI_SDR_finite.numpy()) 
-
-
-if __name__ == '__main__':
-    import torchaudio
-    import museval
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    """
-    torch.manual_seed(42)
-    estimate = torch.rand(1, 1, 12*44100)
-    target = torch.rand(1, 1, 12*44100)
-    
-    print(sisdrNew(target,estimate,44100))
-    print(np.mean(museval.evaluate(target[0],estimate[0])[0]))
-    """
-    
-    mixture, sample_rate = torchaudio.load('convtasnet_1_0mixture.wav')
-    target, sample_rate = torchaudio.load('convtasnet_1_0target.wav')
-    estimate,sample_rate = torchaudio.load('convtasnet_400_0estimate.wav')
-    
-    mixture = mixture[...,:44100]
-    target = target[...,:44100]
-    estimate = estimate[...,:44100]
-    
-    print("-------Original SI-SNR:",sisdr_framewise(estimate,target,44100))
-    print("-------New SI-SNR:",sisdr_framewise(estimate,target,44100))
-    print(museval.evaluate(target,estimate))    

@@ -109,20 +109,25 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         seq_duration=6.0,
         samples_per_track=64,
         source_augmentations=lambda audio: audio,
-        random_track_mix=False,
-        random_chunk_start=False,
-        augment_sources=False,
-        random_channel=False,
+        random_track_mix=False, # Switch the random track selection for each source
+        random_chunk_start=False, # Switch the random chunk start at each epoch
+        augment_sources=False, # Switch the sources augmentation (gain, channelswap)
+        random_channel=False, # Switch the random channel selection at train time
         dtype=torch.float32,
         nb_channels=2,
         fake=False,
         *args, **kwargs
     ):
         """MUSDB18 torch.data.Dataset that samples from the MUSDB tracks
-        using track and excerpts with replacement.
+        and stored phoneme posteriograms using track and excerpts with replacement.
 
         Parameters
         ----------
+        modelname : str
+            parameter currently unused, to use if other models may be used and
+            require a different handling of the data (e.g. ConvTasNet)
+        root_phoneme : str
+            relative path to the phoneme posteriograms
         target : str
             target name of the source to be separated, defaults to ``vocals``.
         root : str
@@ -149,8 +154,22 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         random_track_mix : boolean
             randomly mixes sources from different tracks to assemble a
             custom mix. This augmenation is only applied for the train subset.
+        random_chunk_start : boolean
+            randomly select start times at each epoch. If disabled, the start time
+            of extracts will be saved and reused for all epochs.
+        augment_sources : boolean
+            use the sources augmentation (gain, channelswap)
+        random_channel : boolean
+            use random channel selection at train time
         dtype : numeric type
             data type of torch output tuple x and y
+        nb_channels : int
+            1 or 2, give the number of audio channels to output for the model.
+            At test time, both channels are ealuated always, possibly separatly
+            in the case the model has been trained on mono signals.
+        fake : boolean
+            instead of the posteriograms corresponding to the extracts and the songs,
+            output 0 tensors.
         args, kwargs : additional keyword arguments
             used to add further control for the musdb dataset
             initialization function.
@@ -193,7 +212,8 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         
         self.dtype = dtype
         
-        if self.random_chunk_start == False and self.split == 'train': # save tracks numbers
+        # save tracks numbers if random chunk strt is disabled
+        if self.random_chunk_start == False and self.split == 'train': 
             self.dataindex = torch.zeros(len(self.mus),self.samples_per_track)
             for i in range(len(self.mus)):
                 track = self.mus.tracks[i]
@@ -214,7 +234,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
         audio_sources = []
         target_ind = None
         
-        """
+        """ use this piece of code if you want to check the workers behavior
         if torch.utils.data.get_worker_info() is not None:
             print(torch.utils.data.get_worker_info())
             print(random.random())
@@ -260,9 +280,6 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
                     
                     if self.fake:
                         phoneme = torch.zeros(phoneme.shape)
-                        #nb_of_phonemes = phoneme.shape[-1]
-                        #indice = np.random.randint(0,nb_of_phonemes)
-                        #phoneme[...,indice] = 1
                     
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
@@ -309,13 +326,7 @@ class MUSDBDatasetInformed(torch.utils.data.Dataset):
             phoneme = self.phonemes_dict[track.name][:nbFrames]
             
             if self.fake:
-                # numpy has a different random stack than random, that's why we use
-                # it in the fake case to enable reproductability (same samples
-                # between fake and non-fake versions)
                 phoneme = torch.zeros(phoneme.shape)
-                #nb_of_phonemes = phoneme.shape[-1]
-                #indice = np.random.randint(0,nb_of_phonemes)
-                #phoneme[...,indice] = 1
             
             # select left or right depending on index even or not
             if self.nb_channels == 1: 

@@ -26,6 +26,21 @@ def seed_all(seed):
     torch.backends.cudnn.benchmark = False
 
 def evalTargets(joint,args,device):
+    """
+    Input:
+        joint : boolean
+            joint model between target / rest or not. Argument currently not meaningful
+            because Open-Unmix is NOT a joint model. However since Open-Unmix also
+            estimatest the residual by substracting, default value is True
+        args : argparse arguments
+        device : torch.device
+            set CPU or GPU depending on the machine which is used
+    Return:
+        a list of SI-SDR scores over 1s for vocals for each track, a list of SDR
+        scores for vocals, a list of SI-SDR scores for accompaniment, a list of SDR
+        scores for accompaniment, a list of track names
+    """
+    
     mus = musdb.DB(
         root=args.root,
         download=args.root is None,
@@ -33,17 +48,21 @@ def evalTargets(joint,args,device):
         is_wav=args.is_wav
     )
     
+    # output lists
     SI_SDRscores_vocals = []
     SDRscores_vocals = []
     SI_SDRscores_accompaniment = []
     SDRscores_accompaniment = []
     tracks = []
     
+    # create directory to store .json files with the metrics
     if not os.path.exists(args.evaldir):
         os.makedirs(args.evaldir)
     
     for track in tqdm.tqdm(mus.tracks):
         print(track.name)
+        
+        # load the posteriogram corresponding to the current track
         phoneme = torch.load(args.root_phoneme+'/'
                                 +'test'+'_'+track.name+'.pt')
         
@@ -89,6 +108,8 @@ def evalTargets(joint,args,device):
         
         frame_list = []
         
+        # fill a list over each seconds with the metrics, that will be dumped
+        # to a .json file
         for i,k in enumerate(vocals_SISDR):
             frame_list.append({"time" : float(i), "duration" : 1.0,
                         "metrics" : {"SI-SDR_vocals" : -vocals_SISDR[i].item(),
@@ -121,7 +142,7 @@ def evalTargets(joint,args,device):
         medians[0]["median_SISDR_accompaniment"] = -median_SISDR_accompaniment
         medians[0]["median_SDR_accompaniment"] = -median_SDR_accompaniment
         
-        
+        # write the metrics for the current song to a .json file
         with open(args.evaldir+'/'+track.name+'.json', 'w') as outfile:
             json.dump([medians,frame_list], outfile, indent=2)
         
@@ -213,7 +234,7 @@ if __name__ == '__main__':
         
     if not model_path.exists():
         raise NameError('Model path is wrong')
-            # assume model is a path to a local model_name directory
+            # we assume model is a path to a local model_name directory
     else:
         # load model from disk, there should be only one target
         with open(Path(model_path, args.targets[0] + '.json'), 'r') as stream:
@@ -226,7 +247,11 @@ if __name__ == '__main__':
     
     seed_all(results['args']['seed'])
     
+    
     SI_SDRscores_vocals,SDRscores_vocals, SI_SDRscores_accompaniment,SDRscores_accompaniment,tracks = evalTargets(joint,args,device)
+    
+    # Below, do some printing for having results in the console, as well as overall
+    # results written to a .txt file
     
     overall_SI_SDR_vocals = np.median(np.array(SI_SDRscores_vocals))
     overall_SDR_vocals = np.median(np.array(SDRscores_vocals))

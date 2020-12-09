@@ -28,6 +28,21 @@ def seed_all(seed):
     torch.backends.cudnn.benchmark = False
 
 def evalTargets(joint,args,device):
+    """
+    Input:
+        joint : boolean
+            joint model between target / rest or not. Argument currently not meaningful
+            because Open-Unmix is NOT a joint model. However since Open-Unmix also
+            estimatest the residual by substracting, default value is True
+        args : argparse arguments
+        device : torch.device
+            set CPU or GPU depending on the machine which is used
+    Return:
+        a list of SI-SDR scores for vocals for each track on the unvoiced sections, 
+        a list of SDR scores for vocals, a list of SI-SDR scores for accompaniment,
+        a list of SDR scores for accompaniment, a list of track names
+    """
+    
     mus = musdb.DB(
         root=args.root,
         download=args.root is None,
@@ -35,17 +50,21 @@ def evalTargets(joint,args,device):
         is_wav=args.is_wav
     )
     
+    # output lists
     SI_SDRscores_vocals = []
     SDRscores_vocals = []
     SI_SDRscores_accompaniment = []
     SDRscores_accompaniment = []
     tracks = []
     
+    # create directory to store .json files with the metrics
     if not os.path.exists(args.evaldir):
         os.makedirs(args.evaldir)
     
     for track in tqdm.tqdm(mus.tracks):
         print(track.name)
+        
+        # load the posteriogram corresponding to the current track
         phoneme = torch.load(args.root_phoneme+'/'
                                 +'test'+'_'+track.name+'.pt')
         
@@ -88,6 +107,8 @@ def evalTargets(joint,args,device):
             accompaniment = torch.from_numpy(track.targets['accompaniment'].audio.T)
             estimated_accompaniment = torch.from_numpy(estimates['accompaniment'].T)
         
+        # to save metric values for each unvoiced section for one track, in order
+        # to compute the median later on
         saved_voc_SISDR = []
         saved_voc_SDR = []
         saved_acc_SISDR = []
@@ -135,6 +156,8 @@ def evalTargets(joint,args,device):
                 
                 duration = (unv_end[i] - unv_start[i])/track.rate
                 
+                # fill a list over each unvoiced extract with the metrics, that
+                # will be dumped to a .json file
                 frame_list.append({"time" : unv_start[i], "duration" : duration,
                             "metrics" : {"SI-SDR_vocals" : vocals_SISDR,
                             "SI-SDR_accompaniment" : accompaniment_SISDR,

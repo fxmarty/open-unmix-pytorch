@@ -168,7 +168,8 @@ class OpenUnmix(nn.Module):
         
         mix = x.detach().clone()
         
-        # shift and scale input to mean=0 std=1 (across all frames in one freq bin)
+        # shift and scale (across all frames in one freq bin, indifferently for
+        # all batches and all frames)
         x = self.normalize_input(x)
         
         # to (nb_frames*nb_samples, nb_channels*nb_bins)

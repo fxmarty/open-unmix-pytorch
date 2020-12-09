@@ -35,13 +35,33 @@ def seed_all(seed):
     torch.backends.cudnn.benchmark = False
 
 def evalTargets(args,device,typee):
+    """
+    Input:
+        joint : boolean
+            joint model between target / rest or not. Argument currently not meaningful
+            because Open-Unmix is NOT a joint model. However since Open-Unmix also
+            estimatest the residual by substracting, default value is True
+        args : argparse arguments
+        device : torch.device
+            set CPU or GPU depending on the machine which is used
+        typee : str
+            value in ("d","n","s"), that are labels for three types of extracts:
+            2+ singers who sing different text, 1 singer, 2+ singers who sing the
+            same text. Correspond to 3 folders /d/, /n/, /s/ which have .pt files
+            with extracts from songs
+    Return:
+        a list of SI-SDR scores over 1s for vocals for the given type, a list of SDR
+        scores for vocals, a list of SI-SDR scores for accompaniment, a list of SDR
+        scores for accompaniment, a list of sub-track names (the file names in the
+        /type/ folder)
+    """
     
     root = args.root
+    
+    # to modify depending on your case
     lyrics_folder = '/tsi/doctorants/kschulze/Datasets/MUSDB_w_lyrics/lyrics_transcripts/test'
     
-    
-    subfolders = ['d','n','x']
-    
+    # output lists
     SI_SDRscores_vocals = []
     SDRscores_vocals = []
     SI_SDRscores_accompaniment = []
@@ -58,6 +78,8 @@ def evalTargets(args,device,typee):
             song_name_short = song_name_short[0][0:6] + "_" + song_name_short[1][1:6]
             song_name_short = song_name_short.replace(" ", "_")
             
+            # load the posteriogram corresponding to the current track (to be
+            # sliced later to have just the piece corresponding to the extract)
             phoneme = torch.load(args.root_phoneme+'/'
                                     +'test'+'_'+filename.replace('.txt','.pt'))
             
@@ -70,6 +92,8 @@ def evalTargets(args,device,typee):
                     if line[2] != typee:
                         continue
                     
+                    # extract start and end times an extract of type typee
+                    # in the current song
                     start = get_sec(line[0])
                     end = get_sec(line[1])
                     
@@ -85,6 +109,7 @@ def evalTargets(args,device,typee):
                     # to adjust padding at start
                     offset = start - math.floor(start/0.016)*0.016
                     
+                    # load the audio from the /typee/ folder
                     path = root+'/mix/'+typee+'/'+song_name_short+'_'+str(i)+'.pt'
                     mixture = torch.load(path)
                     mixture = torch.cat([torch.zeros(2,int(offset*16000)),mixture],
@@ -104,6 +129,7 @@ def evalTargets(args,device,typee):
                         enforce_fake=args.enforce_fake
                     )
                     
+                    # write the estimate for the extract
                     if args.outdir:
                         if not os.path.exists(args.outdir):
                             os.makedirs(args.outdir)
@@ -160,6 +186,8 @@ def evalTargets(args,device,typee):
 
                     frame_list = []
                     
+                    # fill a list over each seconds with the metrics, that will
+                    #be dumped to a .json file
                     for i,k in enumerate(vocals_SISDR):
                         frame_list.append({
                             "time" : float(i),

@@ -21,6 +21,18 @@ import scipy
 import matplotlib
 
 def detect(audio_mono,rate):
+    """
+    Input:
+        audio_mono : numpy.array
+            vocals audio, mono
+        rate : int
+            sampling rate
+    Output:
+        - unv_start : list
+            list of starting points for the unvoiced sections
+        - unv_end : list
+            list of ending points for the corresponding unvoiced sections
+    """
     
     start = 0
     end = audio_mono.shape[0]/rate
@@ -34,12 +46,11 @@ def detect(audio_mono,rate):
     zcr = librosa.feature.zero_crossing_rate(excerpt,frame_length=int(0.02*rate),hop_length=int(0.02*rate)//4)
     x_zcr = np.linspace(start,end,zcr.shape[1])
 
-
     f, t, Zxx = scipy.signal.stft(excerpt, fs=rate,nperseg=int(0.04*rate),noverlap=3*int(0.04*rate)//4)
     
     Zxx = np.abs(Zxx)
     
-    # We add this to have no error  at normalization just after
+    # We add this to have no error at normalization just after
     Zxx[0] = Zxx[0] + 0.00001
 
     Zxx = Zxx/Zxx.sum(axis=0)
@@ -100,7 +111,6 @@ def detect(audio_mono,rate):
     index_unknown = list_index[0]
     
     
-    
     # Re-label the "unknown" frames surrounding an
     # unvoiced section to unvoiced IF their energy is <1.5 lower.
     current_type = class_resampled[0]
@@ -108,7 +118,6 @@ def detect(audio_mono,rate):
     past_start = -1
     past_end = -1
     past_type = -1
-    
     
     for i,type in enumerate(class_resampled):
         if type == current_type:
@@ -213,9 +222,7 @@ if __name__ == '__main__':
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    
-    #args.song = '/home/felix/Documents/Mines/Césure/_Stage Télécom/song_mono.wav'
-    
+        
     audio, rate = sf.read(
         args.song,
         always_2d=False

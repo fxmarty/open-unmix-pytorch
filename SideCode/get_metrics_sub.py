@@ -8,18 +8,31 @@ import numpy as np
 import matplotlib.patheffects as path_effects
 
 """
-This piece of code allows to get comprehensive metrics from a folder with .json files containing the separation metrics computed with museval module, and so for each track (e.g. in the test set of MUSDB18).
-
-Note that museval yields a single value for each metric at each window, even if the signal is stereo.
+This piece of code allows to get comprehensive metrics from a folder with .json files containing the separation metrics, and so for each subfile as computed from
+eval_sub.py.
 """
 def fill_df(all_types_all_exps,rootdirs,exp_names):
     """
-    types
-    
-    x: no vocals
-    n: 1 singer
-    s: 2+ singers, sing the same text (but maybe different notes)
-    d: 2+ singers, singing different phonemes
+    Input:
+        all_types_all_exps : pandas DataFrame
+            here, an empty dataframe with column 'metric', 'value', 'exp'
+        rootdirs : list
+            a list of directories where the .json files with the evaluation metrics
+            are stored. The key point is that several models can be evaluated at
+            the same time, each with one evaluation folder with the .json.
+        exp_names : list
+            a list of experiment names corresponding to the paths in rootdirs.
+            The box plots will be done by concatenating the metrics from different
+            rootdirs with the same experiment name.
+    Output:
+        all_types_all_exps : pandas DataFrame
+            the DataFrame from the input filled with all the experiments, with
+            columns:
+                'metric': the name of the metric (e.g. "SDR")
+                'value': the value for the corresponding extract
+                'exp': the name of the experiment as specified in exp_names
+                'exp_number': the number of the experiment (0, 1, 2, etc.)
+                'file_number': a number corresponding to an extract (0, 1, 2, etc.)
     """
     types = ['d','n','s']
     
@@ -32,7 +45,6 @@ def fill_df(all_types_all_exps,rootdirs,exp_names):
             for filename in sorted(os.listdir(rootdir+'/'+subtype)):
                 if filename.endswith('.json'):
                     with open(rootdir+'/'+subtype+'/' + filename) as jsonfile:
-                        #print(rootdir + filename)
                         data = json.load(jsonfile)
                     
                     data_df = pd.DataFrame(data)
@@ -76,7 +88,6 @@ def fill_df(all_types_all_exps,rootdirs,exp_names):
             
             all_types = pd.concat([all_types,subdf])
             
-        
         all_types['exp'] = exp_names[i]
         all_types['exp_number'] = i
         all_types_all_exps = pd.concat([all_types,all_types_all_exps])
@@ -86,6 +97,10 @@ def fill_df(all_types_all_exps,rootdirs,exp_names):
     return all_types_all_exps
 
 def create_median_labels(ax, has_fliers,has_mean):
+    """
+    A function based on https://stackoverflow.com/a/63295846/4370080 to
+    add median values to a box plot in seaborn
+    """
     lines = ax.get_lines()
     # depending on fliers, toggle between 5 and 6 lines per box
     lines_per_box = 5 + int(has_fliers) + int(has_mean)
@@ -106,7 +121,19 @@ def create_median_labels(ax, has_fliers,has_mean):
             path_effects.Normal(),
         ])
 
-def show_boxplot(df,metric_list,file_head):
+def show_boxplot(df,file_head):
+    """
+    Input:
+        df : pandas DataFrame
+            a dataframe with columns 'metric', 'value', 'exp', 'exp_number', 
+            'file_number'
+        file_head : str
+            a text to add to the name of the output .png files to give
+    Output:
+        boxplots saved as .png files, one for each metric in df dataframe, grouped
+        by experiment name and type ('d','n','s')
+    """
+    
     metric_list = all_types_all_exps.metric.unique()
     
     for metric_name in metric_list:
@@ -137,10 +164,6 @@ def show_boxplot(df,metric_list,file_head):
         plt.title(metric_name)
         plt.tight_layout()
         plt.savefig(file_head+'_sub_'+metric_name+'.png', dpi=300)
-    #plt.setp(ax.artists, edgecolor = 'k', facecolor='w')
-    #plt.setp(ax.lines, color='k')
-    
-    #plt.show()
 
 if __name__ == "__main__":
     
@@ -154,7 +177,6 @@ if __name__ == "__main__":
         type=str,
         action='append',
         help='Path to the directory with .json files, e.g. expName/evalDir_sub',
-        #required=True
     )
     
     parser.add_argument(
@@ -162,7 +184,6 @@ if __name__ == "__main__":
         type=str,
         action='append',
         help='Experiment name corresponding to the previous root folder',
-        #required=True
     )
     
     parser.add_argument(
@@ -177,12 +198,9 @@ if __name__ == "__main__":
     exp_names = args.name
     
     for i,experiment_path in enumerate(rootdirs):
+        # set this folder to your own where your models are stored
         rootdirs[i] = '/tsi/doctorants/fmarty/executedJobs/'+experiment_path
-    
-    #rootdirs = ['/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub','/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub_bis','/home/felix/Documents/Mines/Césure/_Stage Télécom/Code/evalDir_sub']
-    
-    #exp_names = ["Phoneme", "Fake", "Fake"]
-    
+        
     pd.set_option('display.max_columns', None)
     duplicate = len(exp_names) != len(set(exp_names))
     
@@ -192,10 +210,8 @@ if __name__ == "__main__":
     
     all_types_all_exps = fill_df(all_types_all_exps,rootdirs,exp_names)
     
-    
-    #pd.set_option('display.max_rows', 50)
     """
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(all_types_all_exps)
     """
-    show_boxplot(all_types_all_exps,exp_names,args.file_head)
+    show_boxplot(all_types_all_exps,args.file_head)

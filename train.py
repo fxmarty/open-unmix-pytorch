@@ -43,6 +43,7 @@ import torchsnooper
 import time
 
 # Overright SummaryWriter so that hparams is in the same subfolder as the rest
+# in tensorboard. See https://github.com/pytorch/pytorch/issues/32651
 class SummaryWriter(SummaryWriter):
     def add_hparams(self, hparam_dict, metric_dict):
         torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
@@ -58,7 +59,6 @@ class SummaryWriter(SummaryWriter):
 
 batch_seen = 0
 
-#@torchsnooper.snoop()
 def train(args, unmix, device, train_sampler, optimizer,tb="no"):
     losses = utils.AverageMeter()
     unmix.train()
@@ -86,6 +86,7 @@ def train(args, unmix, device, train_sampler, optimizer,tb="no"):
         loss.backward()
         optimizer.step()
 
+        # these may help for limiting RAM usage
         del Y_hat
         del x
         del y
@@ -110,6 +111,7 @@ def valid(args, unmix, device, valid_sampler,tb="no"):
             
             losses.update(loss.item(), Y.size(1))
             
+            # these may help for limiting RAM usage
             del Y_hat
             del x
             del y
@@ -258,6 +260,8 @@ def main():
                         action='store_false',
                         help='Disable random channel selection for each target in the dataset')
     
+    # two parameters if an external pretrained model is used for the information
+    # network.
     parser.add_argument('--encoder', default=None,
                         help='Encoder path, if used')
     
@@ -266,7 +270,7 @@ def main():
     
     args, _ = parser.parse_known_args()
     
-    # Make normalization-style argument not mendatory
+    # Make normalization-style argument not mandatory
     if args.normalization_style == None:
         parser.set_defaults(normalization_style='overall')
         
@@ -312,6 +316,8 @@ def main():
             "*",train_dataset.samples_per_track,", number of tracks * samples per track)")
     print("Number of batches per epoch:",len(train_dataset)/args.batch_size)
     
+    # Posteriograms of different size can be used indifferently without having
+    # to specify their shape manually
     number_of_phonemes = train_dataset[0][1].shape[1]
     
     # called at every epoch, where initial_seed is different at every epoch and for
@@ -338,7 +344,6 @@ def main():
         scaler_std = None
     else:
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
-        #scaler_mean, scaler_std = None,None
         
     if args.modelname == 'open-unmix' and args.encoder == None:
         unmix = open_unmix.OpenUnmix(
@@ -352,7 +357,8 @@ def main():
             sample_rate=train_dataset.sample_rate,
             number_of_phonemes=number_of_phonemes
         ).to(device)
-        
+    
+    # special version where a part of the model is pretrained
     elif args.modelname == 'open-unmix-encoder' and args.encoder != None:
         unmix = open_unmix_autoencoder.OpenUnmix(
             normalization_style=args.normalization_style,

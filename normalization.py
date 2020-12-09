@@ -32,14 +32,21 @@ class Normalize(nn.Module):
             self.input_scale = nn.Parameter(input_scale)
     
     def forward(self,x):
+        """
+        Input:
+            x : torch.tensor (here: (nb_frames, nb_samples, nb_channels, nb_bins))
+        """
+        # default case for Open-Unmix, same normalization regardless of the batch,
+        # channels, frames.
         if self.normalization_style == 'overall':
             x += self.input_mean
             x *= self.input_scale
         
+        # alternative normalization unique for each batch, each frame
         if self.normalization_style == 'batch-specific':
             if len(x.shape) == 3:
-                xmax = torch.max(x,dim=2)
-                xmin = torch.min(x,dim=2)
+                xmax,xmax_ind = torch.max(x,dim=2)
+                xmin,xmin_ind = torch.min(x,dim=2)
                 xmax = xmax[:,:,None]
                 xmin = xmin[:,:,None]
 
